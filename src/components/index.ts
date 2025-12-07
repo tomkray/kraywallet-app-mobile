@@ -1,0 +1,2 @@
+export { KrayLogo } from './KrayLogo';
+
