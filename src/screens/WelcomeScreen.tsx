@@ -11,13 +11,27 @@ import {
   StyleSheet,
   TouchableOpacity,
   SafeAreaView,
-  Image,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 interface WelcomeScreenProps {
   onCreateWallet: () => void;
   onRestoreWallet: () => void;
+}
+
+// KRAY Logo Text Component (works on all platforms)
+function KrayLogoText() {
+  return (
+    <Text style={{
+      fontSize: 48,
+      fontWeight: '900',
+      color: '#000',
+      fontFamily: Platform.OS === 'web' ? 'system-ui, -apple-system, sans-serif' : undefined,
+    }}>
+      K
+    </Text>
+  );
 }
 
 export function WelcomeScreen({ onCreateWallet, onRestoreWallet }: WelcomeScreenProps) {
@@ -28,11 +42,9 @@ export function WelcomeScreen({ onCreateWallet, onRestoreWallet }: WelcomeScreen
         <View style={styles.content}>
           {/* KRAY Logo */}
           <View style={styles.logoContainer}>
-            <Image
-              source={require('../../assets/icon.png')}
-              style={styles.logoImage}
-              resizeMode="contain"
-            />
+            <View style={styles.logoCircle}>
+              <KrayLogoText />
+            </View>
           </View>
 
           {/* Title */}
@@ -103,17 +115,29 @@ const styles = StyleSheet.create({
     paddingTop: 20,
   },
   logoContainer: {
-    marginBottom: 20,
-    shadowColor: '#fff',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.2,
-    shadowRadius: 30,
-    elevation: 10,
+    marginBottom: 24,
   },
-  logoImage: {
+  logoCircle: {
     width: 100,
     height: 100,
-    borderRadius: 20,
+    borderRadius: 24,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#fff',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.3,
+        shadowRadius: 20,
+      },
+      android: {
+        elevation: 10,
+      },
+      web: {
+        boxShadow: '0 0 30px rgba(255,255,255,0.3)',
+      },
+    }),
   },
   title: {
     fontSize: 32,
@@ -161,11 +185,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     borderRadius: 14,
     marginBottom: 12,
-    shadowColor: '#fff',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 5,
   },
   buttonText: {
     fontSize: 17,
