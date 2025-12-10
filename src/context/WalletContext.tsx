@@ -894,8 +894,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       const txid = await broadcastRes.text();
       console.log('✅ Rune sent:', txid);
       
-      // Refresh runes after sending
-      setTimeout(() => refreshRunes(), 2000);
+      // ⚠️ DON'T auto-refresh runes immediately!
+      // This causes a re-render that resets the success screen state (successTxid)
+      // The user won't see the success screen if we refresh here.
+      // Let the user manually refresh after viewing the success screen.
+      // setTimeout(() => refreshRunes(), 2000);  // DISABLED - causes success screen to disappear!
       
       return txid;
     } finally {
