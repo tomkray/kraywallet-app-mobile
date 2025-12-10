@@ -116,7 +116,7 @@ export function ActivityTab({ transactions, address }: ActivityTabProps) {
   };
 
   const openTransaction = (txid: string) => {
-    Linking.openURL(`https://krayscan.com/tx/${txid}`);
+    Linking.openURL(`https://kray.space/krayscan.html?tx=${txid}`);
   };
 
   const formatAmount = (sats: number) => {
