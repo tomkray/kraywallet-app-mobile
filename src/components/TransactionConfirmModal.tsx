@@ -191,7 +191,7 @@ export function TransactionConfirmModal({
 
   const openInKrayScan = () => {
     if (successTxid) {
-      Linking.openURL(`https://kray.space/krayscan.html?tx=${successTxid}`);
+      Linking.openURL(`https://kray.space/krayscan.html?txid=${successTxid}`);
     }
   };
 

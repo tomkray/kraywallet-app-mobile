@@ -346,7 +346,7 @@ export function OrdinalsTab({ ordinals, walletAddress, onTransfer }: OrdinalsTab
                 
                 <TouchableOpacity 
                   style={styles.explorerButton}
-                  onPress={() => Linking.openURL(`https://kray.space/krayscan.html?tx=${successTxid}`)}
+                  onPress={() => Linking.openURL(`https://kray.space/krayscan.html?txid=${successTxid}`)}
                 >
                   <Ionicons name="search-outline" size={18} color="#fff" />
                   <Text style={styles.explorerText}>View on KrayScan</Text>

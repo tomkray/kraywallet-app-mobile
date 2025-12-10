@@ -432,7 +432,7 @@ export function L2Tab() {
                 
                 <TouchableOpacity 
                   style={styles.explorerButton}
-                  onPress={() => Linking.openURL(`https://kray.space/krayscan.html?tx=${transferSuccessTxid}`)}
+                  onPress={() => Linking.openURL(`https://kray.space/krayscan.html?txid=${transferSuccessTxid}`)}
                 >
                   <Ionicons name="search-outline" size={18} color="#fff" />
                   <Text style={styles.explorerText}>View on KrayScan L2</Text>
@@ -563,7 +563,7 @@ export function L2Tab() {
                 
                 <TouchableOpacity 
                   style={styles.explorerButton}
-                  onPress={() => Linking.openURL(`https://kray.space/krayscan.html?tx=${swapSuccessTxid}`)}
+                  onPress={() => Linking.openURL(`https://kray.space/krayscan.html?txid=${swapSuccessTxid}`)}
                 >
                   <Ionicons name="search-outline" size={18} color="#fff" />
                   <Text style={styles.explorerText}>View on KrayScan L2</Text>
