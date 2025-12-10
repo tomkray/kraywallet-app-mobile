@@ -85,6 +85,9 @@ export function MainWalletScreen({ onSettings, onSend, onReceive, onAtomicSwap, 
   const [scannerTarget, setScannerTarget] = useState<'l2send' | 'send'>('l2send');
   const [scanned, setScanned] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
+  
+  // Rune transfer success state (elevated to prevent loss on re-render)
+  const [runeSuccessTxid, setRuneSuccessTxid] = useState<string | null>(null);
 
   useEffect(() => {
     refreshAll();
@@ -497,8 +500,15 @@ export function MainWalletScreen({ onSettings, onSend, onReceive, onAtomicSwap, 
                   <RunesTab 
                     runes={wallet?.runes || []} 
                     walletAddress={wallet?.address}
+                    externalSuccessTxid={runeSuccessTxid}
+                    onClearSuccess={() => setRuneSuccessTxid(null)}
                     onTransfer={async (rune, toAddress, amount, password) => {
-                      return await sendRune(rune.id, toAddress, amount, password);
+                      const txid = await sendRune(rune.id, toAddress, amount, password);
+                      // Store success txid at parent level to survive re-renders
+                      if (txid) {
+                        setRuneSuccessTxid(txid);
+                      }
+                      return txid;
                     }}
                   />
                 )}

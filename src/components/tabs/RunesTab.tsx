@@ -47,9 +47,12 @@ interface RunesTabProps {
   runes: Rune[];
   walletAddress?: string;
   onTransfer?: (rune: Rune, toAddress: string, amount: string, password: string) => Promise<string>;
+  // External success state (elevated to parent to survive re-renders)
+  externalSuccessTxid?: string | null;
+  onClearSuccess?: () => void;
 }
 
-export function RunesTab({ runes, walletAddress, onTransfer }: RunesTabProps) {
+export function RunesTab({ runes, walletAddress, onTransfer, externalSuccessTxid, onClearSuccess }: RunesTabProps) {
   // Transfer Modal State
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [selectedRune, setSelectedRune] = useState<Rune | null>(null);
@@ -59,7 +62,9 @@ export function RunesTab({ runes, walletAddress, onTransfer }: RunesTabProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [isTransferring, setIsTransferring] = useState(false);
   const [transferError, setTransferError] = useState('');
-  const [successTxid, setSuccessTxid] = useState<string | null>(null);
+  // Use external success txid if available (survives re-renders)
+  const [localSuccessTxid, setLocalSuccessTxid] = useState<string | null>(null);
+  const successTxid = externalSuccessTxid || localSuccessTxid;
   const [copiedTxid, setCopiedTxid] = useState(false);
   
   // QR Scanner State
@@ -100,7 +105,11 @@ export function RunesTab({ runes, walletAddress, onTransfer }: RunesTabProps) {
     setTransferAmount('');
     setPassword('');
     setTransferError('');
-    setSuccessTxid(null);
+    setLocalSuccessTxid(null);
+    // Clear external success state if provided
+    if (onClearSuccess) {
+      onClearSuccess();
+    }
     setCopiedTxid(false);
     setShowTransferModal(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -142,7 +151,7 @@ export function RunesTab({ runes, walletAddress, onTransfer }: RunesTabProps) {
         console.log('✅ Rune transfer result txid:', txid);
         
         if (txid) {
-          setSuccessTxid(txid);
+          setLocalSuccessTxid(txid);
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           setPassword(''); // Clear password
         } else {
@@ -174,7 +183,11 @@ export function RunesTab({ runes, walletAddress, onTransfer }: RunesTabProps) {
   // Close success and modal
   const handleDone = () => {
     setShowTransferModal(false);
-    setSuccessTxid(null);
+    setLocalSuccessTxid(null);
+    // Clear external success state if provided
+    if (onClearSuccess) {
+      onClearSuccess();
+    }
   };
 
   // Handle Max button
