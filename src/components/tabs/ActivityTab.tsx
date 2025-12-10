@@ -1,16 +1,19 @@
 /**
  * Activity Tab Component
- * Transaction history
+ * Transaction history with pending support
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
   TouchableOpacity,
+  Linking,
 } from 'react-native';
+
+const INITIAL_LIMIT = 10; // Show only last 10 transactions initially
 import { Ionicons } from '@expo/vector-icons';
 
 interface Transaction {
@@ -31,6 +34,8 @@ interface ActivityTabProps {
 }
 
 export function ActivityTab({ transactions, address }: ActivityTabProps) {
+  const [showAll, setShowAll] = useState(false);
+  
   if (transactions.length === 0) {
     return (
       <View style={styles.emptyState}>
@@ -43,6 +48,17 @@ export function ActivityTab({ transactions, address }: ActivityTabProps) {
     );
   }
 
+  // Sort: pending first, then by time
+  const sortedTransactions = [...transactions].sort((a, b) => {
+    // Pending transactions first
+    if (!a.status.confirmed && b.status.confirmed) return -1;
+    if (a.status.confirmed && !b.status.confirmed) return 1;
+    // Then by time
+    const timeA = a.status.block_time || Date.now() / 1000;
+    const timeB = b.status.block_time || Date.now() / 1000;
+    return timeB - timeA;
+  });
+
   const formatTime = (timestamp: number) => {
     const date = new Date(timestamp * 1000);
     const now = new Date();
@@ -52,6 +68,7 @@ export function ActivityTab({ transactions, address }: ActivityTabProps) {
     const hours = Math.floor(diff / 3600000);
     const days = Math.floor(diff / 86400000);
     
+    if (minutes < 1) return 'just now';
     if (minutes < 60) return `${minutes}m ago`;
     if (hours < 24) return `${hours}h ago`;
     if (days < 7) return `${days}d ago`;
@@ -59,25 +76,47 @@ export function ActivityTab({ transactions, address }: ActivityTabProps) {
   };
 
   const calculateAmount = (tx: Transaction): { amount: number; isReceive: boolean } => {
-    // Simplified calculation - in production, compare with wallet address
-    let totalIn = 0;
-    let totalOut = 0;
+    if (!address) {
+      // Fallback if no address
+      const totalIn = tx.vin.reduce((sum, input) => sum + (input.prevout?.value || 0), 0);
+      const totalOut = tx.vout.reduce((sum, output) => sum + (output.value || 0), 0);
+      const isReceive = totalOut > totalIn - (tx.fee || 0);
+      return { amount: Math.abs(totalOut - totalIn), isReceive };
+    }
+
+    // Calculate based on wallet address
+    let receivedAmount = 0;
+    let sentFromWallet = false;
     
+    // Check if we sent this transaction (our address in inputs)
     tx.vin.forEach((input: any) => {
-      if (input.prevout?.value) {
-        totalIn += input.prevout.value;
+      if (input.prevout?.scriptpubkey_address === address) {
+        sentFromWallet = true;
       }
     });
     
+    // Sum outputs to our address
     tx.vout.forEach((output: any) => {
-      totalOut += output.value || 0;
+      if (output.scriptpubkey_address === address) {
+        receivedAmount += output.value || 0;
+      }
     });
     
-    const fee = tx.fee || 0;
-    const isReceive = totalOut > totalIn - fee;
-    const amount = isReceive ? totalOut : totalIn - totalOut - fee;
-    
-    return { amount: Math.abs(amount), isReceive };
+    if (sentFromWallet) {
+      // We sent - calculate how much we sent (excluding change)
+      const totalInputFromUs = tx.vin
+        .filter((input: any) => input.prevout?.scriptpubkey_address === address)
+        .reduce((sum: number, input: any) => sum + (input.prevout?.value || 0), 0);
+      const sentAmount = totalInputFromUs - receivedAmount - (tx.fee || 0);
+      return { amount: Math.abs(sentAmount), isReceive: false };
+    } else {
+      // We received
+      return { amount: receivedAmount, isReceive: true };
+    }
+  };
+
+  const openTransaction = (txid: string) => {
+    Linking.openURL(`https://krayscan.com/tx/${txid}`);
   };
 
   const formatAmount = (sats: number) => {
@@ -87,11 +126,16 @@ export function ActivityTab({ transactions, address }: ActivityTabProps) {
     return `${sats.toLocaleString()} sats`;
   };
 
-  const renderTransaction = ({ item }: { item: Transaction }) => {
+  const renderTransaction = ({ item, index }: { item: Transaction; index: number }) => {
     const { amount, isReceive } = calculateAmount(item);
+    const isPending = !item.status.confirmed;
     
     return (
-      <TouchableOpacity style={styles.txItem}>
+      <TouchableOpacity 
+        style={[styles.txItem, isPending && styles.txItemPending]} 
+        onPress={() => openTransaction(item.txid)}
+        activeOpacity={0.7}
+      >
         <View style={[styles.txIcon, isReceive ? styles.txIconReceive : styles.txIconSend]}>
           <Ionicons
             name={isReceive ? 'arrow-down' : 'arrow-up'}
@@ -102,9 +146,16 @@ export function ActivityTab({ transactions, address }: ActivityTabProps) {
         
         <View style={styles.txInfo}>
           <View style={styles.txRow}>
-            <Text style={styles.txType}>
-              {isReceive ? 'Received' : 'Sent'}
-            </Text>
+            <View style={styles.txTypeRow}>
+              <Text style={styles.txType}>
+                {isReceive ? 'Received' : 'Sent'}
+              </Text>
+              {isPending && (
+                <View style={styles.pendingBadge}>
+                  <Text style={styles.pendingBadgeText}>⏳ PENDING</Text>
+                </View>
+              )}
+            </View>
             <Text style={[styles.txAmount, isReceive ? styles.txAmountReceive : styles.txAmountSend]}>
               {isReceive ? '+' : '-'}{formatAmount(amount)}
             </Text>
@@ -124,24 +175,46 @@ export function ActivityTab({ transactions, address }: ActivityTabProps) {
                 </>
               ) : (
                 <>
-                  <View style={styles.pendingDot} />
-                  <Text style={styles.txPending}>Pending</Text>
+                  <Ionicons name="time-outline" size={12} color="#f59e0b" />
+                  <Text style={styles.txPending}>In mempool</Text>
                 </>
               )}
             </View>
           </View>
         </View>
+        
+        <Ionicons name="open-outline" size={14} color="#666" style={styles.txOpenIcon} />
       </TouchableOpacity>
     );
   };
 
+  // Apply limit unless showAll is true
+  const displayedTransactions = showAll 
+    ? sortedTransactions 
+    : sortedTransactions.slice(0, INITIAL_LIMIT);
+  
+  const hasMore = sortedTransactions.length > INITIAL_LIMIT;
+
   return (
     <FlatList
-      data={transactions}
+      data={displayedTransactions}
       renderItem={renderTransaction}
       keyExtractor={(item) => item.txid}
       contentContainerStyle={styles.list}
       showsVerticalScrollIndicator={false}
+      ListFooterComponent={
+        hasMore && !showAll ? (
+          <TouchableOpacity 
+            style={styles.loadMoreButton} 
+            onPress={() => setShowAll(true)}
+          >
+            <Text style={styles.loadMoreText}>
+              Ver mais ({sortedTransactions.length - INITIAL_LIMIT} transações)
+            </Text>
+            <Ionicons name="chevron-down" size={16} color="#f7931a" />
+          </TouchableOpacity>
+        ) : null
+      }
     />
   );
 }
@@ -181,6 +254,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
   },
+  txItemPending: {
+    borderColor: 'rgba(245,158,11,0.4)',
+    backgroundColor: 'rgba(245,158,11,0.05)',
+  },
   txIcon: {
     width: 40,
     height: 40,
@@ -204,10 +281,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 4,
   },
+  txTypeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   txType: {
     fontSize: 15,
     fontWeight: '600',
     color: '#fff',
+  },
+  pendingBadge: {
+    backgroundColor: 'rgba(245,158,11,0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  pendingBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#f59e0b',
+    letterSpacing: 0.5,
   },
   txAmount: {
     fontSize: 14,
@@ -235,15 +329,29 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#888',
   },
-  pendingDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#f59e0b',
-  },
   txPending: {
     fontSize: 11,
     color: '#f59e0b',
+  },
+  txOpenIcon: {
+    marginLeft: 8,
+  },
+  loadMoreButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    marginTop: 8,
+    backgroundColor: 'rgba(247,147,26,0.1)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(247,147,26,0.3)',
+    gap: 8,
+  },
+  loadMoreText: {
+    color: '#f7931a',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 

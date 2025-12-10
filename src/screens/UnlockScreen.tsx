@@ -15,10 +15,10 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useWallet } from '../context/WalletContext';
+import colors from '../theme/colors';
 
 interface UnlockScreenProps {
   onUnlock: () => void;
@@ -61,10 +61,7 @@ export function UnlockScreen({ onUnlock, onRestore }: UnlockScreenProps) {
   };
 
   return (
-    <LinearGradient
-      colors={['#0a0a0a', '#1a1a1a', '#0a0a0a']}
-      style={styles.container}
-    >
+    <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -73,12 +70,9 @@ export function UnlockScreen({ onUnlock, onRestore }: UnlockScreenProps) {
           <View style={styles.content}>
             {/* Logo */}
             <View style={styles.logoContainer}>
-              <LinearGradient
-                colors={['#f7931a', '#ff6b00']}
-                style={styles.logoGradient}
-              >
-                <Ionicons name="lock-closed" size={40} color="#fff" />
-              </LinearGradient>
+              <View style={styles.logoCircle}>
+                <Ionicons name="lock-closed" size={36} color={colors.white} />
+              </View>
             </View>
 
             {/* Title */}
@@ -91,7 +85,7 @@ export function UnlockScreen({ onUnlock, onRestore }: UnlockScreenProps) {
                 <TextInput
                   style={styles.input}
                   placeholder="Enter password"
-                  placeholderTextColor="#666"
+                  placeholderTextColor={colors.textMuted}
                   secureTextEntry={!showPassword}
                   value={password}
                   onChangeText={(text) => {
@@ -110,7 +104,7 @@ export function UnlockScreen({ onUnlock, onRestore }: UnlockScreenProps) {
                   <Ionicons
                     name={showPassword ? 'eye-off' : 'eye'}
                     size={20}
-                    color="#666"
+                    color={colors.textMuted}
                   />
                 </TouchableOpacity>
               </View>
@@ -118,7 +112,7 @@ export function UnlockScreen({ onUnlock, onRestore }: UnlockScreenProps) {
               {/* Error Message */}
               {error ? (
                 <View style={styles.errorContainer}>
-                  <Ionicons name="alert-circle" size={16} color="#ef4444" />
+                  <Ionicons name="alert-circle" size={16} color={colors.error} />
                   <Text style={styles.errorText}>{error}</Text>
                 </View>
               ) : null}
@@ -130,19 +124,14 @@ export function UnlockScreen({ onUnlock, onRestore }: UnlockScreenProps) {
               onPress={handleUnlock}
               disabled={isLoading}
             >
-              <LinearGradient
-                colors={isLoading ? ['#666', '#555'] : ['#f7931a', '#e67e00']}
-                style={styles.buttonGradient}
-              >
-                {isLoading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <>
-                    <Ionicons name="lock-open" size={20} color="#fff" />
-                    <Text style={styles.unlockButtonText}>Unlock Wallet</Text>
-                  </>
-                )}
-              </LinearGradient>
+              {isLoading ? (
+                <ActivityIndicator color={colors.buttonPrimaryText} />
+              ) : (
+                <>
+                  <Ionicons name="lock-open" size={20} color={colors.buttonPrimaryText} />
+                  <Text style={styles.unlockButtonText}>Unlock Wallet</Text>
+                </>
+              )}
             </TouchableOpacity>
 
             {/* Restore Link */}
@@ -154,13 +143,14 @@ export function UnlockScreen({ onUnlock, onRestore }: UnlockScreenProps) {
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: colors.background,
   },
   safeArea: {
     flex: 1,
@@ -177,27 +167,25 @@ const styles = StyleSheet.create({
   logoContainer: {
     marginBottom: 32,
   },
-  logoGradient: {
+  logoCircle: {
     width: 80,
     height: 80,
     borderRadius: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#f7931a',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 16,
-    elevation: 10,
+    backgroundColor: colors.backgroundCard,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#fff',
+    color: colors.textPrimary,
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
-    color: '#888',
+    color: colors.textSecondary,
     marginBottom: 40,
   },
   inputSection: {
@@ -207,16 +195,16 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: colors.backgroundCard,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: colors.border,
     paddingHorizontal: 16,
   },
   input: {
     flex: 1,
     fontSize: 16,
-    color: '#fff',
+    color: colors.textPrimary,
     paddingVertical: 18,
   },
   eyeButton: {
@@ -230,32 +218,26 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 14,
-    color: '#ef4444',
+    color: colors.error,
     marginLeft: 6,
   },
   unlockButton: {
     width: '100%',
     borderRadius: 16,
     overflow: 'hidden',
-    shadowColor: '#f7931a',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  unlockButtonDisabled: {
-    shadowOpacity: 0,
-  },
-  buttonGradient: {
+    backgroundColor: colors.buttonPrimary,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 18,
   },
+  unlockButtonDisabled: {
+    opacity: 0.5,
+  },
   unlockButtonText: {
     fontSize: 17,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.buttonPrimaryText,
     marginLeft: 10,
   },
   restoreLink: {
@@ -264,10 +246,10 @@ const styles = StyleSheet.create({
   },
   restoreLinkText: {
     fontSize: 14,
-    color: '#888',
+    color: colors.textSecondary,
   },
   restoreHighlight: {
-    color: '#f7931a',
+    color: colors.textPrimary,
     fontWeight: '600',
   },
 });

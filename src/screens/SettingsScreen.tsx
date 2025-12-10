@@ -1,6 +1,6 @@
 /**
  * Settings Screen
- * Wallet settings and security options
+ * KRAY OS Style - Black & White
  */
 
 import React, { useState } from 'react';
@@ -12,74 +12,36 @@ import {
   ScrollView,
   SafeAreaView,
   Alert,
-  TextInput,
-  Modal,
+  Switch,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
-import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../context/WalletContext';
+import colors from '../theme/colors';
 
 interface SettingsScreenProps {
   onBack: () => void;
-  onLogout: () => void;
+  onBackup: () => void;
 }
 
-export function SettingsScreen({ onBack, onLogout }: SettingsScreenProps) {
-  const { wallet, getMnemonic, deleteWallet, lockWallet } = useWallet();
-  
-  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
-  const [recoveryPassword, setRecoveryPassword] = useState('');
-  const [recoveryPhrase, setRecoveryPhrase] = useState<string[]>([]);
-  const [recoveryError, setRecoveryError] = useState('');
-  const [copied, setCopied] = useState(false);
+export function SettingsScreen({ onBack, onBackup }: SettingsScreenProps) {
+  const { lockWallet, resetWallet } = useWallet();
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
 
-  const handleShowRecovery = async () => {
-    setRecoveryError('');
-    
-    const mnemonic = await getMnemonic(recoveryPassword);
-    if (mnemonic) {
-      setRecoveryPhrase(mnemonic.split(' '));
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } else {
-      setRecoveryError('Incorrect password');
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    }
+  const handleLock = async () => {
+    await lockWallet();
   };
 
-  const handleCopyRecovery = async () => {
-    await Clipboard.setStringAsync(recoveryPhrase.join(' '));
-    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 3000);
-  };
-
-  const handleCloseRecoveryModal = () => {
-    setShowRecoveryModal(false);
-    setRecoveryPassword('');
-    setRecoveryPhrase([]);
-    setRecoveryError('');
-  };
-
-  const handleLock = () => {
-    lockWallet();
-    onLogout();
-  };
-
-  const handleResetWallet = () => {
+  const handleReset = () => {
     Alert.alert(
-      '⚠️ Reset Wallet',
-      'This will permanently delete your wallet from this device. Make sure you have your recovery phrase backed up!\n\nThis action cannot be undone.',
+      'Reset Wallet',
+      'This will delete all wallet data. Make sure you have backed up your recovery phrase.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Reset',
           style: 'destructive',
           onPress: async () => {
-            await deleteWallet();
-            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            onLogout();
+            await resetWallet();
           },
         },
       ]
@@ -87,233 +49,121 @@ export function SettingsScreen({ onBack, onLogout }: SettingsScreenProps) {
   };
 
   return (
-    <LinearGradient
-      colors={['#0a0a0a', '#1a1a1a', '#0a0a0a']}
-      style={styles.container}
-    >
+    <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
+            <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Settings</Text>
           <View style={styles.headerRight} />
         </View>
 
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Wallet Info */}
+          {/* Security Section */}
+          <Text style={styles.sectionTitle}>SECURITY</Text>
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Wallet</Text>
-            <View style={styles.card}>
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Address</Text>
-                <Text style={styles.infoValue} numberOfLines={1}>
-                  {wallet?.address ? `${wallet.address.slice(0, 12)}...${wallet.address.slice(-8)}` : 'N/A'}
-                </Text>
+            <TouchableOpacity style={styles.menuItem} onPress={onBackup}>
+              <View style={styles.menuItemLeft}>
+                <View style={styles.iconContainer}>
+                  <Ionicons name="document-text" size={20} color={colors.textPrimary} />
+                </View>
+                <View>
+                  <Text style={styles.menuItemTitle}>Backup Phrase</Text>
+                  <Text style={styles.menuItemSubtitle}>View your recovery phrase</Text>
+                </View>
               </View>
-              <View style={styles.divider} />
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Address Type</Text>
-                <Text style={styles.infoValue}>Taproot (P2TR)</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Security */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Security</Text>
-            
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => setShowRecoveryModal(true)}
-            >
-              <View style={styles.menuIconContainer}>
-                <Ionicons name="key" size={20} color="#f7931a" />
-              </View>
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>Show Recovery Phrase</Text>
-                <Text style={styles.menuSubtitle}>View your backup phrase</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="#666" />
+              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
             </TouchableOpacity>
+
+            <View style={styles.menuItem}>
+              <View style={styles.menuItemLeft}>
+                <View style={styles.iconContainer}>
+                  <Ionicons name="finger-print" size={20} color={colors.textPrimary} />
+                </View>
+                <View>
+                  <Text style={styles.menuItemTitle}>Biometric Lock</Text>
+                  <Text style={styles.menuItemSubtitle}>Use Face ID or Touch ID</Text>
+                </View>
+              </View>
+              <Switch
+                value={biometricEnabled}
+                onValueChange={setBiometricEnabled}
+                trackColor={{ false: colors.backgroundCard, true: colors.textPrimary }}
+                thumbColor={colors.white}
+              />
+            </View>
 
             <TouchableOpacity style={styles.menuItem} onPress={handleLock}>
-              <View style={styles.menuIconContainer}>
-                <Ionicons name="lock-closed" size={20} color="#3b82f6" />
+              <View style={styles.menuItemLeft}>
+                <View style={styles.iconContainer}>
+                  <Ionicons name="lock-closed" size={20} color={colors.textPrimary} />
+                </View>
+                <View>
+                  <Text style={styles.menuItemTitle}>Lock Wallet</Text>
+                  <Text style={styles.menuItemSubtitle}>Require password to access</Text>
+                </View>
               </View>
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>Lock Wallet</Text>
-                <Text style={styles.menuSubtitle}>Require password to unlock</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="#666" />
+              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
             </TouchableOpacity>
           </View>
 
-          {/* Network */}
+          {/* About Section */}
+          <Text style={styles.sectionTitle}>ABOUT</Text>
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Network</Text>
-            
-            <View style={styles.card}>
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Network</Text>
-                <View style={styles.networkBadge}>
-                  <View style={styles.networkDot} />
-                  <Text style={styles.networkText}>Mainnet</Text>
+            <View style={styles.menuItem}>
+              <View style={styles.menuItemLeft}>
+                <View style={styles.iconContainer}>
+                  <Ionicons name="information-circle" size={20} color={colors.textPrimary} />
                 </View>
-              </View>
-              <View style={styles.divider} />
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>L2 Status</Text>
-                <View style={[styles.networkBadge, styles.l2Badge]}>
-                  <View style={[styles.networkDot, styles.l2Dot]} />
-                  <Text style={[styles.networkText, styles.l2Text]}>Connected</Text>
+                <View>
+                  <Text style={styles.menuItemTitle}>Version</Text>
+                  <Text style={styles.menuItemSubtitle}>2.0.0</Text>
                 </View>
               </View>
             </View>
-          </View>
 
-          {/* About */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>About</Text>
-            
-            <View style={styles.card}>
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Version</Text>
-                <Text style={styles.infoValue}>1.0.0</Text>
+            <TouchableOpacity style={styles.menuItem}>
+              <View style={styles.menuItemLeft}>
+                <View style={styles.iconContainer}>
+                  <Ionicons name="help-circle" size={20} color={colors.textPrimary} />
+                </View>
+                <View>
+                  <Text style={styles.menuItemTitle}>Help & Support</Text>
+                  <Text style={styles.menuItemSubtitle}>Get help with KrayWallet</Text>
+                </View>
               </View>
-              <View style={styles.divider} />
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Build</Text>
-                <Text style={styles.infoValue}>Mobile Native</Text>
-              </View>
-            </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
           </View>
 
           {/* Danger Zone */}
+          <Text style={styles.sectionTitle}>DANGER ZONE</Text>
           <View style={styles.section}>
-            <Text style={[styles.sectionTitle, styles.dangerTitle]}>Danger Zone</Text>
-            
-            <TouchableOpacity
-              style={[styles.menuItem, styles.dangerItem]}
-              onPress={handleResetWallet}
-            >
-              <View style={[styles.menuIconContainer, styles.dangerIconContainer]}>
-                <Ionicons name="trash" size={20} color="#ef4444" />
+            <TouchableOpacity style={styles.menuItemDanger} onPress={handleReset}>
+              <View style={styles.menuItemLeft}>
+                <View style={[styles.iconContainer, styles.iconContainerDanger]}>
+                  <Ionicons name="trash" size={20} color={colors.error} />
+                </View>
+                <View>
+                  <Text style={styles.menuItemTitleDanger}>Reset Wallet</Text>
+                  <Text style={styles.menuItemSubtitle}>Delete all wallet data</Text>
+                </View>
               </View>
-              <View style={styles.menuContent}>
-                <Text style={[styles.menuTitle, styles.dangerText]}>Reset Wallet</Text>
-                <Text style={styles.menuSubtitle}>Delete wallet from device</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="#666" />
+              <Ionicons name="chevron-forward" size={20} color={colors.error} />
             </TouchableOpacity>
           </View>
-
-          <View style={styles.bottomPadding} />
         </ScrollView>
-
-        {/* Recovery Phrase Modal */}
-        <Modal
-          visible={showRecoveryModal}
-          animationType="slide"
-          transparent={true}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Recovery Phrase</Text>
-                <TouchableOpacity onPress={handleCloseRecoveryModal}>
-                  <Ionicons name="close" size={24} color="#fff" />
-                </TouchableOpacity>
-              </View>
-
-              {recoveryPhrase.length === 0 ? (
-                <>
-                  {/* Password Input */}
-                  <View style={styles.modalBody}>
-                    <Text style={styles.modalText}>
-                      Enter your password to view your recovery phrase
-                    </Text>
-                    
-                    <TextInput
-                      style={styles.modalInput}
-                      placeholder="Enter password"
-                      placeholderTextColor="#666"
-                      secureTextEntry
-                      value={recoveryPassword}
-                      onChangeText={setRecoveryPassword}
-                      autoCapitalize="none"
-                    />
-
-                    {recoveryError ? (
-                      <Text style={styles.modalError}>{recoveryError}</Text>
-                    ) : null}
-                  </View>
-
-                  <TouchableOpacity
-                    style={styles.modalButton}
-                    onPress={handleShowRecovery}
-                  >
-                    <LinearGradient
-                      colors={['#f7931a', '#e67e00']}
-                      style={styles.modalButtonGradient}
-                    >
-                      <Text style={styles.modalButtonText}>Show Phrase</Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <>
-                  {/* Recovery Phrase Display */}
-                  <View style={styles.modalBody}>
-                    <View style={styles.warningBanner}>
-                      <Ionicons name="warning" size={20} color="#f59e0b" />
-                      <Text style={styles.warningText}>
-                        Never share your recovery phrase!
-                      </Text>
-                    </View>
-
-                    <View style={styles.phraseGrid}>
-                      {recoveryPhrase.map((word, index) => (
-                        <View key={index} style={styles.phraseWord}>
-                          <Text style={styles.phraseNumber}>{index + 1}</Text>
-                          <Text style={styles.phraseText}>{word}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-
-                  <TouchableOpacity
-                    style={styles.modalButton}
-                    onPress={handleCopyRecovery}
-                  >
-                    <LinearGradient
-                      colors={copied ? ['#10b981', '#059669'] : ['#3b82f6', '#2563eb']}
-                      style={styles.modalButtonGradient}
-                    >
-                      <Ionicons
-                        name={copied ? 'checkmark' : 'copy'}
-                        size={18}
-                        color="#fff"
-                      />
-                      <Text style={styles.modalButtonText}>
-                        {copied ? 'Copied!' : 'Copy to Clipboard'}
-                      </Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
-          </View>
-        </Modal>
       </SafeAreaView>
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: colors.background,
   },
   safeArea: {
     flex: 1,
@@ -325,7 +175,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
+    borderBottomColor: colors.border,
   },
   backButton: {
     padding: 8,
@@ -333,232 +183,75 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.textPrimary,
   },
   headerRight: {
     width: 40,
   },
   content: {
     flex: 1,
-    padding: 20,
-  },
-  section: {
-    marginBottom: 32,
-  },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#888',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 12,
-  },
-  card: {
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    overflow: 'hidden',
-  },
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     padding: 16,
   },
-  infoLabel: {
-    fontSize: 14,
-    color: '#888',
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textMuted,
+    marginBottom: 12,
+    marginTop: 24,
+    letterSpacing: 1,
   },
-  infoValue: {
-    fontSize: 14,
-    color: '#fff',
-    fontWeight: '500',
-    maxWidth: '60%',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+  section: {
+    backgroundColor: colors.backgroundCard,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     padding: 16,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  menuIconContainer: {
+  menuItemDanger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+  },
+  menuItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  iconContainer: {
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: 'rgba(247,147,26,0.1)',
+    backgroundColor: colors.backgroundSecondary,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 14,
   },
-  menuContent: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  menuTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 2,
-  },
-  menuSubtitle: {
-    fontSize: 13,
-    color: '#666',
-  },
-  networkBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(247,147,26,0.1)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  networkDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#f7931a',
-    marginRight: 6,
-  },
-  networkText: {
-    fontSize: 12,
-    color: '#f7931a',
-    fontWeight: '600',
-  },
-  l2Badge: {
-    backgroundColor: 'rgba(16,185,129,0.1)',
-  },
-  l2Dot: {
-    backgroundColor: '#10b981',
-  },
-  l2Text: {
-    color: '#10b981',
-  },
-  dangerTitle: {
-    color: '#ef4444',
-  },
-  dangerItem: {
-    borderColor: 'rgba(239,68,68,0.3)',
-  },
-  dangerIconContainer: {
+  iconContainerDanger: {
     backgroundColor: 'rgba(239,68,68,0.1)',
   },
-  dangerText: {
-    color: '#ef4444',
-  },
-  bottomPadding: {
-    height: 40,
-  },
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#1a1a1a',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-    maxHeight: '80%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  modalBody: {
-    marginBottom: 24,
-  },
-  modalText: {
-    fontSize: 14,
-    color: '#888',
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  modalInput: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    padding: 16,
+  menuItemTitle: {
     fontSize: 16,
-    color: '#fff',
+    fontWeight: '600',
+    color: colors.textPrimary,
+    marginBottom: 2,
   },
-  modalError: {
-    color: '#ef4444',
-    fontSize: 14,
-    marginTop: 12,
-    textAlign: 'center',
-  },
-  modalButton: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginBottom: 16,
-  },
-  modalButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    gap: 8,
-  },
-  modalButtonText: {
+  menuItemTitleDanger: {
     fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  warningBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(245,158,11,0.1)',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-  },
-  warningText: {
-    fontSize: 14,
-    color: '#f59e0b',
     fontWeight: '600',
-    marginLeft: 8,
+    color: colors.error,
+    marginBottom: 2,
   },
-  phraseGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  phraseWord: {
-    width: '30%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 8,
-    padding: 8,
-    marginBottom: 8,
-  },
-  phraseNumber: {
-    fontSize: 10,
-    color: '#666',
-    width: 18,
-  },
-  phraseText: {
-    fontSize: 12,
-    color: '#fff',
-    fontWeight: '600',
+  menuItemSubtitle: {
+    fontSize: 13,
+    color: colors.textMuted,
   },
 });
-

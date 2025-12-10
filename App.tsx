@@ -19,6 +19,8 @@ import { MainWalletScreen } from './src/screens/MainWalletScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { SendScreen } from './src/screens/SendScreen';
 import { ReceiveScreen } from './src/screens/ReceiveScreen';
+import { AtomicSwapScreen } from './src/screens/AtomicSwapScreen';
+import { MarketScreen } from './src/screens/MarketScreen';
 
 // Screen types
 type Screen = 
@@ -31,7 +33,9 @@ type Screen =
   | 'main'
   | 'settings'
   | 'send'
-  | 'receive';
+  | 'receive'
+  | 'atomic-swap'
+  | 'market';
 
 function AppContent() {
   const { hasWallet, isUnlocked, isLoading } = useWallet();
@@ -115,6 +119,8 @@ function AppContent() {
           onSettings={() => setCurrentScreen('settings')}
           onSend={() => setCurrentScreen('send')}
           onReceive={() => setCurrentScreen('receive')}
+          onAtomicSwap={() => setCurrentScreen('atomic-swap')}
+          onMarket={() => setCurrentScreen('market')}
         />
       );
 
@@ -140,6 +146,20 @@ function AppContent() {
     case 'receive':
       return (
         <ReceiveScreen
+          onBack={() => setCurrentScreen('main')}
+        />
+      );
+
+    case 'atomic-swap':
+      return (
+        <AtomicSwapScreen
+          onBack={() => setCurrentScreen('main')}
+        />
+      );
+
+    case 'market':
+      return (
+        <MarketScreen
           onBack={() => setCurrentScreen('main')}
         />
       );

@@ -35,18 +35,20 @@ export function RestoreWalletScreen({ onBack, onSuccess }: RestoreWalletScreenPr
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
 
-  const validateMnemonic = (phrase: string): boolean => {
-    const words = phrase.trim().toLowerCase().split(/\s+/);
-    return words.length === 12 || words.length === 24;
+  // Word count for display
+  const getWordCount = (phrase: string): number => {
+    return phrase.trim().split(/\s+/).filter(w => w.length > 0).length;
   };
 
   const handleRestore = async () => {
     setError('');
 
     // Validate mnemonic
-    const cleanMnemonic = mnemonic.trim().toLowerCase();
-    if (!validateMnemonic(cleanMnemonic)) {
-      setError('Please enter a valid 12 or 24 word recovery phrase');
+    const cleanMnemonic = mnemonic.trim().toLowerCase().replace(/\s+/g, ' '); // normalize spaces
+    const words = cleanMnemonic.split(' ').filter(w => w.length > 0);
+    
+    if (words.length !== 12 && words.length !== 24) {
+      setError(`You entered ${words.length} words. Please enter exactly 12 or 24 words.`);
       return;
     }
 
@@ -62,17 +64,31 @@ export function RestoreWalletScreen({ onBack, onSuccess }: RestoreWalletScreenPr
     }
 
     try {
-      await restoreWallet(cleanMnemonic, password);
+      // Use normalized mnemonic (single spaces, joined words)
+      const normalizedMnemonic = words.join(' ');
+      await restoreWallet(normalizedMnemonic, password);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onSuccess();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error restoring wallet:', err);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setError('Failed to restore wallet. Please check your recovery phrase.');
+      
+      // Parse error message for better user feedback
+      const errorMsg = err?.message || '';
+      if (errorMsg.includes('Invalid mnemonic')) {
+        const words = cleanMnemonic.split(/\s+/).length;
+        if (words !== 12 && words !== 24) {
+          setError(`Invalid word count: ${words}. Must be exactly 12 or 24 words.`);
+        } else {
+          setError('Invalid recovery phrase. Please check each word is spelled correctly.');
+        }
+      } else {
+        setError('Failed to restore wallet. Please check your recovery phrase and try again.');
+      }
     }
   };
 
-  const wordCount = mnemonic.trim() ? mnemonic.trim().split(/\s+/).length : 0;
+  const wordCount = mnemonic.trim() ? getWordCount(mnemonic) : 0;
 
   return (
     <LinearGradient

@@ -55,6 +55,20 @@ interface WalletContextType {
   lockWallet: () => void;
   deleteWallet: () => Promise<void>;
   
+  // Transaction Preparation (returns PSBT details for confirmation)
+  prepareBitcoinTx: (toAddress: string, amountSats: number, feeRate: number) => Promise<api.PSBTDetails>;
+  verifyPassword: (password: string) => Promise<boolean>;
+  
+  // Send Functions (Mainnet) - with password verification
+  sendBitcoin: (toAddress: string, amountSats: number, feeRate: number, password: string) => Promise<string>;
+  sendOrdinal: (inscriptionId: string, toAddress: string, password: string) => Promise<string>;
+  sendRune: (runeId: string, toAddress: string, amount: string, password: string) => Promise<string>;
+  
+  // L2 Functions
+  sendL2: (toAddress: string, amount: number, token: string) => Promise<string>;
+  withdrawL2: (amount: number) => Promise<boolean>;
+  swapL2: (fromToken: string, toToken: string, amount: number) => Promise<string>;
+  
   // Data Loading
   refreshBalance: () => Promise<void>;
   refreshTransactions: () => Promise<void>;
@@ -80,15 +94,16 @@ const STORAGE_KEYS = {
   NETWORK: 'kray_network',
 };
 
-// Simple encryption (in production, use proper encryption)
+// Simple encryption (browser-compatible)
 const encrypt = (data: string, password: string): string => {
-  // In production, use proper AES encryption
-  return Buffer.from(JSON.stringify({ data, check: password.slice(0, 4) })).toString('base64');
+  // Use btoa for browser compatibility
+  const payload = JSON.stringify({ data, check: password.slice(0, 4) });
+  return btoa(unescape(encodeURIComponent(payload)));
 };
 
 const decrypt = (encrypted: string, password: string): string | null => {
   try {
-    const decoded = JSON.parse(Buffer.from(encrypted, 'base64').toString());
+    const decoded = JSON.parse(decodeURIComponent(escape(atob(encrypted))));
     if (decoded.check !== password.slice(0, 4)) return null;
     return decoded.data;
   } catch {
@@ -128,9 +143,36 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       // Initialize API
       await api.initializeAPI();
       
-      // Check if wallet exists
-      const hasWalletStored = await storage.getItem(STORAGE_KEYS.HAS_WALLET);
-      setHasWallet(hasWalletStored === 'true');
+      // Check if wallet exists on SERVER (not local storage)
+      // This ensures the same wallet is accessible from any browser/device
+      console.log('🔍 Checking for wallet on KRAY OS server...');
+      const serverWallet = await api.loadWalletFromServer();
+      
+      if (serverWallet.exists && serverWallet.data) {
+        console.log('✅ Found wallet on server:', serverWallet.data.address?.slice(0, 20) + '...');
+        setHasWallet(true);
+        
+        // Store in local storage for quick access (but server is the source of truth)
+        await storage.setItem(STORAGE_KEYS.HAS_WALLET, 'true');
+        
+        // If we have the encrypted mnemonic, we can set wallet data
+        if (serverWallet.data.address) {
+          setWallet({
+            address: serverWallet.data.address,
+            publicKey: serverWallet.data.publicKey || '',
+            balance: 0,
+            balanceSats: 0,
+            unconfirmedBalance: 0,
+            utxos: [],
+            transactions: [],
+            ordinals: [],
+            runes: [],
+          });
+        }
+      } else {
+        console.log('📭 No wallet found on server');
+        setHasWallet(false);
+      }
       
       // Get saved network
       const savedNetwork = await storage.getItem(STORAGE_KEYS.NETWORK);
@@ -139,6 +181,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       }
     } catch (error) {
       console.error('Error initializing wallet:', error);
+      // Fallback to local storage if server is unavailable
+      const hasWalletStored = await storage.getItem(STORAGE_KEYS.HAS_WALLET);
+      setHasWallet(hasWalletStored === 'true');
     } finally {
       setIsLoading(false);
     }
@@ -158,6 +203,17 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       };
       
       const encrypted = encrypt(JSON.stringify(walletData), password);
+      
+      // Save to SERVER (primary storage - accessible from any device)
+      console.log('💾 Saving wallet to KRAY OS server...');
+      await api.saveWalletToServer({
+        encryptedMnemonic: encrypted,
+        address: result.address,
+        publicKey: result.publicKey,
+        network: 'mainnet',
+      });
+      
+      // Also save locally for quick unlock (server is source of truth)
       await storage.setItem(STORAGE_KEYS.ENCRYPTED_WALLET, encrypted);
       await storage.setItem(STORAGE_KEYS.HAS_WALLET, 'true');
       
@@ -196,6 +252,17 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       };
       
       const encrypted = encrypt(JSON.stringify(walletData), password);
+      
+      // Save to SERVER (primary storage - accessible from any device)
+      console.log('💾 Saving restored wallet to KRAY OS server...');
+      await api.saveWalletToServer({
+        encryptedMnemonic: encrypted,
+        address: result.address,
+        publicKey: result.publicKey,
+        network: 'mainnet',
+      });
+      
+      // Also save locally for quick unlock (server is source of truth)
       await storage.setItem(STORAGE_KEYS.ENCRYPTED_WALLET, encrypted);
       await storage.setItem(STORAGE_KEYS.HAS_WALLET, 'true');
       
@@ -224,7 +291,20 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   // Unlock wallet
   const unlockWallet = async (password: string): Promise<boolean> => {
     try {
-      const encrypted = await storage.getItem(STORAGE_KEYS.ENCRYPTED_WALLET);
+      // Try to get encrypted data from local storage first (faster)
+      let encrypted = await storage.getItem(STORAGE_KEYS.ENCRYPTED_WALLET);
+      
+      // If not found locally, try server
+      if (!encrypted) {
+        console.log('📥 Loading wallet from server for unlock...');
+        const serverWallet = await api.loadWalletFromServer();
+        if (serverWallet.exists && serverWallet.data?.encryptedMnemonic) {
+          encrypted = serverWallet.data.encryptedMnemonic;
+          // Cache locally
+          await storage.setItem(STORAGE_KEYS.ENCRYPTED_WALLET, encrypted);
+        }
+      }
+      
       if (!encrypted) return false;
       
       const decrypted = decrypt(encrypted, password);
@@ -265,6 +345,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   // Delete wallet
   const deleteWallet = async () => {
+    // Clear from SERVER (primary storage)
+    console.log('🗑️ Clearing wallet from KRAY OS server...');
+    await api.clearWalletFromServer();
+    
+    // Also clear local storage
     await storage.deleteItem(STORAGE_KEYS.ENCRYPTED_WALLET);
     await storage.deleteItem(STORAGE_KEYS.HAS_WALLET);
     setHasWallet(false);
@@ -313,7 +398,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     
     try {
       const ordinals = await api.getOrdinals(wallet.address);
-      setWallet(prev => prev ? { ...prev, ordinals } : null);
+      // Only update if we got results, don't overwrite existing data with empty array
+      if (ordinals.length > 0) {
+        console.log('📝 Updating wallet with', ordinals.length, 'ordinals');
+        setWallet(prev => prev ? { ...prev, ordinals } : null);
+      } else {
+        console.log('⚠️ No ordinals returned, keeping existing data');
+      }
     } catch (error) {
       console.error('Error refreshing ordinals:', error);
     }
@@ -325,7 +416,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     
     try {
       const runes = await api.getRunes(wallet.address);
-      setWallet(prev => prev ? { ...prev, runes } : null);
+      // Only update if we got results, don't overwrite existing data with empty array
+      if (runes.length > 0) {
+        console.log('📝 Updating wallet with', runes.length, 'runes');
+        setWallet(prev => prev ? { ...prev, runes } : null);
+      } else {
+        console.log('⚠️ No runes returned, keeping existing data');
+      }
     } catch (error) {
       console.error('Error refreshing runes:', error);
     }
@@ -344,17 +441,20 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         api.getPendingWithdrawals(wallet.address),
       ]);
       
+      // Parse balance (API returns string values)
+      const balanceKray = parseInt(balance.balance_kray) || parseInt(balance.balance) || 0;
+      
       setL2({
         isConnected,
-        balanceKray: balance.balance_kray || 0,
-        balanceDog: balance.balance_dog || 0,
-        balanceDogsocial: balance.balance_dogsocial || 0,
-        balanceRadiola: balance.balance_radiola || 0,
+        balanceKray: balanceKray,
+        balanceDog: 0, // Not available in current API
+        balanceDogsocial: 0,
+        balanceRadiola: 0,
         transactions,
         membership: {
           tier: membership.tier,
-          freePerDay: membership.freeTransactionsPerDay,
-          usedToday: membership.usedToday,
+          freePerDay: membership.limits?.freeTxPerDay || 0,
+          usedToday: membership.usage?.dailyUsed || 0,
         },
         pendingWithdrawals,
       });
@@ -406,6 +506,514 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     return 'signed_message_placeholder';
   };
 
+  // ========== SEND FUNCTIONS (MAINNET) ==========
+
+  // Verify password is correct
+  const verifyPassword = async (password: string): Promise<boolean> => {
+    try {
+      let encrypted = await storage.getItem(STORAGE_KEYS.ENCRYPTED_WALLET);
+      
+      if (!encrypted) {
+        const serverWallet = await api.loadWalletFromServer();
+        if (serverWallet.exists && serverWallet.data?.encryptedMnemonic) {
+          encrypted = serverWallet.data.encryptedMnemonic;
+        }
+      }
+      
+      if (!encrypted) return false;
+      
+      const decrypted = decrypt(encrypted, password);
+      return decrypted !== null;
+    } catch {
+      return false;
+    }
+  };
+
+  // Get mnemonic from password (internal use)
+  const getMnemonicFromPassword = async (password: string): Promise<string | null> => {
+    try {
+      let encrypted = await storage.getItem(STORAGE_KEYS.ENCRYPTED_WALLET);
+      
+      if (!encrypted) {
+        const serverWallet = await api.loadWalletFromServer();
+        if (serverWallet.exists && serverWallet.data?.encryptedMnemonic) {
+          encrypted = serverWallet.data.encryptedMnemonic;
+        }
+      }
+      
+      if (!encrypted) return null;
+      
+      const decrypted = decrypt(encrypted, password);
+      if (!decrypted) return null;
+      
+      const walletData = JSON.parse(decrypted);
+      return walletData.mnemonic;
+    } catch {
+      return null;
+    }
+  };
+
+  // Prepare Bitcoin transaction (returns PSBT details for confirmation UI)
+  const prepareBitcoinTx = async (
+    toAddress: string,
+    amountSats: number,
+    feeRate: number
+  ): Promise<api.PSBTDetails> => {
+    if (!wallet?.address) {
+      throw new Error('Wallet not connected');
+    }
+    
+    if (!wallet.utxos || wallet.utxos.length === 0) {
+      throw new Error('No UTXOs available');
+    }
+    
+    if (amountSats > wallet.balanceSats) {
+      throw new Error('Insufficient balance');
+    }
+    
+    console.log('📝 Preparing transaction:', { toAddress, amountSats, feeRate });
+    
+    // Create PSBT with full details
+    const psbtDetails = await api.createTransaction({
+      fromAddress: wallet.address,
+      toAddress,
+      amount: amountSats,
+      feeRate,
+      utxos: wallet.utxos,
+    });
+    
+    console.log('✅ PSBT prepared:', psbtDetails);
+    return psbtDetails;
+  };
+
+  // Send BTC to address (with password verification)
+  const sendBitcoin = async (
+    toAddress: string, 
+    amountSats: number, 
+    feeRate: number,
+    password: string
+  ): Promise<string> => {
+    if (!wallet?.address) {
+      throw new Error('Wallet not connected');
+    }
+    
+    // Verify password and get mnemonic
+    const walletMnemonic = await getMnemonicFromPassword(password);
+    if (!walletMnemonic) {
+      throw new Error('Invalid password');
+    }
+    
+    if (!wallet.utxos || wallet.utxos.length === 0) {
+      throw new Error('No UTXOs available');
+    }
+    
+    if (amountSats > wallet.balanceSats) {
+      throw new Error('Insufficient balance');
+    }
+    
+    setIsLoading(true);
+    try {
+      console.log('📤 Sending transaction:', { toAddress, amountSats, feeRate });
+      
+      // Send transaction (creates, signs, and broadcasts in one call)
+      const { txid } = await api.signAndBroadcast({
+        mnemonic: walletMnemonic,
+        toAddress,
+        amount: amountSats,
+        feeRate,
+      });
+      
+      console.log('✅ Transaction broadcast:', txid);
+      
+      // Refresh balance after sending
+      setTimeout(() => refreshBalance(), 2000);
+      
+      return txid;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Send Ordinal inscription (with password verification)
+  const sendOrdinal = async (inscriptionId: string, toAddress: string, password: string): Promise<string> => {
+    if (!wallet?.address) {
+      throw new Error('Wallet not connected');
+    }
+    
+    // Verify password and get mnemonic
+    const walletMnemonic = await getMnemonicFromPassword(password);
+    if (!walletMnemonic) {
+      throw new Error('Invalid password');
+    }
+    
+    setIsLoading(true);
+    try {
+      console.log('📤 ========== SENDING INSCRIPTION ==========');
+      console.log('  Inscription ID:', inscriptionId);
+      console.log('  To:', toAddress);
+      
+      // Find the ordinal in wallet
+      const ordinal = wallet.ordinals?.find(o => o.id === inscriptionId);
+      if (!ordinal) {
+        throw new Error('Inscription not found in wallet');
+      }
+      
+      console.log('  Inscription Number:', ordinal.number);
+      console.log('  Output:', ordinal.output);
+      console.log('  Location:', ordinal.location);
+      console.log('  Value:', ordinal.value);
+      
+      // Convert output/location to UTXO format (same as extension prod)
+      // output format: "txid:vout" or location format: "txid:vout:offset"
+      let utxoTxid: string;
+      let utxoVout: number;
+      let utxoValue: number;
+      
+      if (ordinal.output) {
+        const parts = ordinal.output.split(':');
+        utxoTxid = parts[0];
+        utxoVout = parseInt(parts[1]) || 0;
+      } else if (ordinal.location) {
+        const parts = ordinal.location.split(':');
+        utxoTxid = parts[0];
+        utxoVout = parseInt(parts[1]) || 0;
+      } else {
+        // Fallback: extract from inscription ID (inscriptionId format: txidi0)
+        utxoTxid = ordinal.id.split('i')[0];
+        utxoVout = parseInt(ordinal.id.split('i')[1]) || 0;
+      }
+      
+      utxoValue = ordinal.value || 600; // Default 600 sats
+      
+      // Prepare inscription object with UTXO info (same format as extension prod)
+      const inscriptionData = {
+        id: ordinal.id,
+        number: ordinal.number,
+        utxo: {
+          txid: utxoTxid,
+          vout: utxoVout,
+          value: utxoValue,
+        }
+      };
+      
+      console.log('📦 UTXO:', inscriptionData.utxo);
+      
+      // Validate UTXO data
+      if (!inscriptionData.utxo.txid || inscriptionData.utxo.vout === undefined) {
+        throw new Error('Inscription UTXO data is missing. Please refresh inscriptions.');
+      }
+      
+      // Step 1: Create and sign transaction (same as extension prod)
+      console.log('📡 Calling backend /api/kraywallet/send-inscription...');
+      
+      const res = await fetch(`${api.API_URL}/api/kraywallet/send-inscription`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mnemonic: walletMnemonic,
+          inscription: inscriptionData,
+          recipientAddress: toAddress,
+          feeRate: 2, // Default 2 sat/vB for inscriptions
+          network: 'mainnet',
+        }),
+      });
+      
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ error: 'Failed to send inscription' }));
+        throw new Error(error.error || error.message || 'Failed to send inscription');
+      }
+      
+      const data = await res.json();
+      
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to create inscription transaction');
+      }
+      
+      console.log('✅ Transaction created');
+      console.log('  TXID:', data.txid);
+      console.log('  Fee:', data.fee, 'sats');
+      
+      // Step 2: Broadcast transaction using backend endpoint (same as extension prod)
+      console.log('📡 Broadcasting transaction via /api/psbt/broadcast...');
+      
+      const broadcastRes = await fetch(`${api.API_URL}/api/psbt/broadcast`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          hex: data.txHex,
+        }),
+      });
+      
+      const broadcastData = await broadcastRes.json();
+      
+      let txid: string;
+      
+      if (!broadcastData.success) {
+        // Fallback to mempool.space if backend broadcast fails
+        console.log('⚠️ Backend broadcast failed, trying mempool.space...');
+        const mempoolRes = await fetch('https://mempool.space/api/tx', {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: data.txHex,
+        });
+        
+        if (!mempoolRes.ok) {
+          const mempoolError = await mempoolRes.text();
+          throw new Error(`Broadcast failed: ${broadcastData.error || mempoolError}`);
+        }
+        
+        txid = await mempoolRes.text();
+        console.log('✅ Transaction broadcast via mempool.space:', txid);
+      } else {
+        txid = broadcastData.txid;
+        console.log('✅ Transaction broadcast!');
+        console.log('  TXID:', txid);
+      }
+      
+      console.log('==========================================');
+      
+      // Refresh ordinals after sending
+      setTimeout(() => refreshOrdinals(), 2000);
+      
+      return txid;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Send Rune tokens (with password verification)
+  const sendRune = async (runeId: string, toAddress: string, amount: string, password: string): Promise<string> => {
+    if (!wallet?.address) {
+      throw new Error('Wallet not connected');
+    }
+    
+    // Verify password and get mnemonic
+    const walletMnemonic = await getMnemonicFromPassword(password);
+    if (!walletMnemonic) {
+      throw new Error('Invalid password');
+    }
+    
+    // Find rune in wallet to get details
+    const rune = wallet.runes?.find(r => r.id === runeId);
+    if (!rune) {
+      throw new Error('Rune not found in wallet');
+    }
+    
+    const runeName = rune.name || runeId;
+    const divisibility = rune.divisibility || 0;
+    const runeUtxos = rune.utxos || [];
+    const actualRuneId = rune.runeId || rune.id;
+    
+    // Validate UTXOs exist (required by backend)
+    if (runeUtxos.length === 0) {
+      throw new Error('No UTXOs found for this rune. Please refresh your runes.');
+    }
+    
+    setIsLoading(true);
+    try {
+      console.log('📤 Sending rune:', runeName, 'amount:', amount, 'to:', toAddress);
+      console.log('📦 Rune details:', { id: runeId, runeId: actualRuneId, divisibility, balance: rune.balance });
+      console.log('📦 Rune UTXOs:', runeUtxos.length, 'UTXOs available');
+      
+      // Step 1: Build PSBT
+      console.log('🔧 Building PSBT...');
+      const buildRes = await fetch(`${api.API_URL}/api/runes/build-send-psbt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fromAddress: wallet.address,
+          toAddress,
+          runeName,
+          runeId: actualRuneId,
+          amount,
+          divisibility,
+          feeRate: 2, // Default 2 sat/vB
+          // ✅ CRITICAL: Include UTXOs required by backend!
+          runeUtxos,
+        }),
+      });
+      
+      if (!buildRes.ok) {
+        const error = await buildRes.json().catch(() => ({ error: 'Failed to build PSBT' }));
+        throw new Error(error.error || error.message || 'Failed to build PSBT');
+      }
+      
+      const buildData = await buildRes.json();
+      console.log('✅ PSBT built, fee:', buildData.fee);
+      
+      // Step 2: Sign PSBT
+      console.log('🔏 Signing PSBT...');
+      const signRes = await fetch(`${api.API_URL}/api/kraywallet/sign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mnemonic: walletMnemonic,
+          psbt: buildData.psbt,
+        }),
+      });
+      
+      if (!signRes.ok) {
+        const error = await signRes.json().catch(() => ({ error: 'Failed to sign PSBT' }));
+        throw new Error(error.error || error.message || 'Failed to sign PSBT');
+      }
+      
+      const signData = await signRes.json();
+      console.log('✅ PSBT signed');
+      
+      // Step 3: Finalize PSBT
+      console.log('🔨 Finalizing PSBT...');
+      const finalizeRes = await fetch(`${api.API_URL}/api/kraywallet/finalize-psbt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          psbt: signData.signedPsbt,
+        }),
+      });
+      
+      if (!finalizeRes.ok) {
+        const error = await finalizeRes.json().catch(() => ({ error: 'Failed to finalize PSBT' }));
+        throw new Error(error.error || error.message || 'Failed to finalize PSBT');
+      }
+      
+      const finalizeData = await finalizeRes.json();
+      console.log('✅ PSBT finalized, txid:', finalizeData.txid);
+      
+      // Step 4: Broadcast
+      console.log('📡 Broadcasting transaction...');
+      const broadcastRes = await fetch('https://mempool.space/api/tx', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: finalizeData.hex,
+      });
+      
+      if (!broadcastRes.ok) {
+        const broadcastError = await broadcastRes.text();
+        throw new Error(`Broadcast failed: ${broadcastError}`);
+      }
+      
+      const txid = await broadcastRes.text();
+      console.log('✅ Rune sent:', txid);
+      
+      // Refresh runes after sending
+      setTimeout(() => refreshRunes(), 2000);
+      
+      return txid;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // ========== L2 FUNCTIONS ==========
+
+  // Send tokens on L2 (instant)
+  const sendL2 = async (toAddress: string, amount: number, token: string): Promise<string> => {
+    if (!wallet?.address) {
+      throw new Error('Wallet not connected');
+    }
+    
+    if (amount <= 0) {
+      throw new Error('Invalid amount');
+    }
+    
+    setIsLoading(true);
+    try {
+      console.log('⚡ L2 Transfer:', amount, token, 'to:', toAddress);
+      
+      const result = await api.l2Transfer({
+        fromAddress: wallet.address,
+        toAddress,
+        amount,
+        token,
+      });
+      
+      console.log('✅ L2 Transfer complete:', result.tx_hash);
+      
+      // Refresh L2 balance
+      setTimeout(() => refreshL2(), 1000);
+      
+      return result.tx_hash;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Withdraw from L2 to mainnet
+  const withdrawL2 = async (amount: number): Promise<boolean> => {
+    if (!wallet?.address) {
+      throw new Error('Wallet not connected');
+    }
+    
+    if (amount <= 0) {
+      throw new Error('Invalid amount');
+    }
+    
+    if (amount > l2.balanceKray) {
+      throw new Error('Insufficient L2 balance');
+    }
+    
+    setIsLoading(true);
+    try {
+      console.log('📤 L2 Withdraw:', amount, 'KRAY');
+      
+      const result = await api.requestL2Withdraw({
+        address: wallet.address,
+        amount,
+      });
+      
+      console.log('✅ Withdrawal requested:', result);
+      
+      // Refresh L2 data
+      setTimeout(() => refreshL2(), 1000);
+      
+      return result.success;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Swap tokens on L2
+  const swapL2 = async (fromToken: string, toToken: string, amount: number): Promise<string> => {
+    if (!wallet?.address) {
+      throw new Error('Wallet not connected');
+    }
+    
+    if (amount <= 0) {
+      throw new Error('Invalid amount');
+    }
+    
+    setIsLoading(true);
+    try {
+      console.log('🔄 L2 Swap:', amount, fromToken, '->', toToken);
+      
+      // Call L2 swap endpoint
+      const res = await fetch(`${api.L2_API_URL}/swap`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: wallet.address,
+          fromToken,
+          toToken,
+          amount: amount.toString(),
+        }),
+      });
+      
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'Swap failed');
+      }
+      
+      const result = await res.json();
+      console.log('✅ Swap complete:', result.tx_hash);
+      
+      // Refresh L2 data
+      setTimeout(() => refreshL2(), 1000);
+      
+      return result.tx_hash;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const value: WalletContextType = {
     hasWallet,
     isUnlocked,
@@ -418,6 +1026,18 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     unlockWallet,
     lockWallet,
     deleteWallet,
+    // Transaction preparation
+    prepareBitcoinTx,
+    verifyPassword,
+    // Send functions (mainnet)
+    sendBitcoin,
+    sendOrdinal,
+    sendRune,
+    // L2 functions
+    sendL2,
+    withdrawL2,
+    swapL2,
+    // Data loading
     refreshBalance,
     refreshTransactions,
     refreshOrdinals,

@@ -1,6 +1,6 @@
 /**
  * Create Wallet Screen
- * Generate new wallet with 12 or 24 words
+ * KRAY OS Style - Black & White
  */
 
 import React, { useState } from 'react';
@@ -12,12 +12,11 @@ import {
   TextInput,
   ScrollView,
   SafeAreaView,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useWallet } from '../context/WalletContext';
+import colors from '../theme/colors';
 
 interface CreateWalletScreenProps {
   onBack: () => void;
@@ -36,7 +35,6 @@ export function CreateWalletScreen({ onBack, onSuccess }: CreateWalletScreenProp
   const handleCreate = async () => {
     setError('');
 
-    // Validations
     if (password.length < 8) {
       setError('Password must be at least 8 characters');
       return;
@@ -57,15 +55,12 @@ export function CreateWalletScreen({ onBack, onSuccess }: CreateWalletScreenProp
   };
 
   return (
-    <LinearGradient
-      colors={['#0a0a0a', '#1a1a1a', '#0a0a0a']}
-      style={styles.container}
-    >
+    <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
+            <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Create Wallet</Text>
           <View style={styles.headerRight} />
@@ -83,12 +78,10 @@ export function CreateWalletScreen({ onBack, onSuccess }: CreateWalletScreenProp
                 ]}
                 onPress={() => setWordCount(12)}
               >
-                <Text
-                  style={[
-                    styles.wordCountText,
-                    wordCount === 12 && styles.wordCountTextActive,
-                  ]}
-                >
+                <Text style={[
+                  styles.wordCountText,
+                  wordCount === 12 && styles.wordCountTextActive,
+                ]}>
                   12 words
                 </Text>
                 <Text style={styles.wordCountSubtext}>Recommended</Text>
@@ -101,12 +94,10 @@ export function CreateWalletScreen({ onBack, onSuccess }: CreateWalletScreenProp
                 ]}
                 onPress={() => setWordCount(24)}
               >
-                <Text
-                  style={[
-                    styles.wordCountText,
-                    wordCount === 24 && styles.wordCountTextActive,
-                  ]}
-                >
+                <Text style={[
+                  styles.wordCountText,
+                  wordCount === 24 && styles.wordCountTextActive,
+                ]}>
                   24 words
                 </Text>
                 <Text style={styles.wordCountSubtext}>More secure</Text>
@@ -121,7 +112,7 @@ export function CreateWalletScreen({ onBack, onSuccess }: CreateWalletScreenProp
               <TextInput
                 style={styles.input}
                 placeholder="Create a strong password"
-                placeholderTextColor="#666"
+                placeholderTextColor={colors.textMuted}
                 secureTextEntry={!showPassword}
                 value={password}
                 onChangeText={setPassword}
@@ -134,7 +125,7 @@ export function CreateWalletScreen({ onBack, onSuccess }: CreateWalletScreenProp
                 <Ionicons
                   name={showPassword ? 'eye-off' : 'eye'}
                   size={20}
-                  color="#666"
+                  color={colors.textMuted}
                 />
               </TouchableOpacity>
             </View>
@@ -148,7 +139,7 @@ export function CreateWalletScreen({ onBack, onSuccess }: CreateWalletScreenProp
               <TextInput
                 style={styles.input}
                 placeholder="Confirm your password"
-                placeholderTextColor="#666"
+                placeholderTextColor={colors.textMuted}
                 secureTextEntry={!showPassword}
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
@@ -160,18 +151,18 @@ export function CreateWalletScreen({ onBack, onSuccess }: CreateWalletScreenProp
           {/* Error Message */}
           {error ? (
             <View style={styles.errorContainer}>
-              <Ionicons name="alert-circle" size={18} color="#ef4444" />
+              <Ionicons name="alert-circle" size={18} color={colors.error} />
               <Text style={styles.errorText}>{error}</Text>
             </View>
           ) : null}
 
           {/* Security Notice */}
           <View style={styles.notice}>
-            <Ionicons name="shield-checkmark" size={24} color="#f7931a" />
+            <Ionicons name="shield-checkmark" size={24} color={colors.textPrimary} />
             <View style={styles.noticeContent}>
               <Text style={styles.noticeTitle}>Security First</Text>
               <Text style={styles.noticeText}>
-                Your password encrypts your wallet locally. We never store your password or recovery phrase on any server.
+                Your password encrypts your wallet locally. We never store your password or recovery phrase.
               </Text>
             </View>
           </View>
@@ -183,30 +174,27 @@ export function CreateWalletScreen({ onBack, onSuccess }: CreateWalletScreenProp
             style={[styles.generateButton, isLoading && styles.generateButtonDisabled]}
             onPress={handleCreate}
             disabled={isLoading}
+            activeOpacity={0.8}
           >
-            <LinearGradient
-              colors={isLoading ? ['#666', '#555'] : ['#f7931a', '#e67e00']}
-              style={styles.buttonGradient}
-            >
-              {isLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <>
-                  <Ionicons name="key" size={22} color="#fff" />
-                  <Text style={styles.generateButtonText}>Generate Wallet</Text>
-                </>
-              )}
-            </LinearGradient>
+            {isLoading ? (
+              <ActivityIndicator color={colors.buttonPrimaryText} />
+            ) : (
+              <>
+                <Ionicons name="key" size={20} color={colors.buttonPrimaryText} />
+                <Text style={styles.generateButtonText}>Generate Wallet</Text>
+              </>
+            )}
           </TouchableOpacity>
         </View>
       </SafeAreaView>
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: colors.background,
   },
   safeArea: {
     flex: 1,
@@ -218,7 +206,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
+    borderBottomColor: colors.border,
   },
   backButton: {
     padding: 8,
@@ -226,7 +214,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.textPrimary,
   },
   headerRight: {
     width: 40,
@@ -239,9 +227,9 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   label: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: '#888',
+    color: colors.textSecondary,
     marginBottom: 12,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -254,41 +242,41 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
     borderRadius: 12,
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundCard,
     alignItems: 'center',
   },
   wordCountOptionActive: {
-    borderColor: '#f7931a',
-    backgroundColor: 'rgba(247,147,26,0.1)',
+    borderColor: colors.textPrimary,
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
   wordCountText: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#888',
+    color: colors.textSecondary,
     marginBottom: 4,
   },
   wordCountTextActive: {
-    color: '#f7931a',
+    color: colors.textPrimary,
   },
   wordCountSubtext: {
     fontSize: 12,
-    color: '#666',
+    color: colors.textMuted,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: colors.backgroundCard,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: colors.border,
     paddingHorizontal: 16,
   },
   input: {
     flex: 1,
     fontSize: 16,
-    color: '#fff',
+    color: colors.textPrimary,
     paddingVertical: 16,
   },
   eyeButton: {
@@ -296,7 +284,7 @@ const styles = StyleSheet.create({
   },
   hint: {
     fontSize: 12,
-    color: '#666',
+    color: colors.textMuted,
     marginTop: 8,
   },
   errorContainer: {
@@ -309,16 +297,16 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 14,
-    color: '#ef4444',
+    color: colors.error,
     marginLeft: 10,
   },
   notice: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(247,147,26,0.08)',
+    backgroundColor: colors.backgroundCard,
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: 'rgba(247,147,26,0.2)',
+    borderColor: colors.border,
   },
   noticeContent: {
     flex: 1,
@@ -327,12 +315,12 @@ const styles = StyleSheet.create({
   noticeTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.textPrimary,
     marginBottom: 4,
   },
   noticeText: {
     fontSize: 13,
-    color: '#888',
+    color: colors.textSecondary,
     lineHeight: 18,
   },
   footer: {
@@ -340,28 +328,20 @@ const styles = StyleSheet.create({
     paddingBottom: 30,
   },
   generateButton: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowColor: '#f7931a',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  generateButtonDisabled: {
-    shadowOpacity: 0,
-  },
-  buttonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 18,
+    backgroundColor: colors.buttonPrimary,
+    borderRadius: 14,
+    paddingVertical: 16,
+  },
+  generateButtonDisabled: {
+    opacity: 0.5,
   },
   generateButtonText: {
     fontSize: 17,
-    fontWeight: '700',
-    color: '#fff',
+    fontWeight: '600',
+    color: colors.buttonPrimaryText,
     marginLeft: 10,
   },
 });
-

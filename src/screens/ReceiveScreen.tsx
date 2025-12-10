@@ -1,6 +1,6 @@
 /**
  * Receive Screen
- * Display QR code for receiving Bitcoin
+ * KRAY OS Style - Black & White
  */
 
 import React, { useState } from 'react';
@@ -12,12 +12,12 @@ import {
   SafeAreaView,
   Share,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import QRCode from 'react-native-qrcode-svg';
 import { useWallet } from '../context/WalletContext';
+import colors from '../theme/colors';
 
 interface ReceiveScreenProps {
   onBack: () => void;
@@ -25,12 +25,13 @@ interface ReceiveScreenProps {
 
 export function ReceiveScreen({ onBack }: ReceiveScreenProps) {
   const { wallet } = useWallet();
-  
   const [copied, setCopied] = useState(false);
 
+  const address = wallet?.address || '';
+
   const handleCopy = async () => {
-    if (wallet?.address) {
-      await Clipboard.setStringAsync(wallet.address);
+    if (address) {
+      await Clipboard.setStringAsync(address);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -38,30 +39,22 @@ export function ReceiveScreen({ onBack }: ReceiveScreenProps) {
   };
 
   const handleShare = async () => {
-    if (wallet?.address) {
-      try {
-        await Share.share({
-          message: wallet.address,
-          title: 'My Bitcoin Address',
-        });
-      } catch (err) {
-        console.error('Error sharing:', err);
-      }
+    if (address) {
+      await Share.share({
+        message: address,
+        title: 'My Bitcoin Address',
+      });
     }
   };
 
   return (
-    <LinearGradient
-      colors={['#0a0a0a', '#1a1a1a', '#0a0a0a']}
-      style={styles.container}
-    >
+    <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
+            <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Receive Bitcoin</Text>
+          <Text style={styles.headerTitle}>Receive</Text>
           <View style={styles.headerRight} />
         </View>
 
@@ -69,12 +62,12 @@ export function ReceiveScreen({ onBack }: ReceiveScreenProps) {
           {/* QR Code */}
           <View style={styles.qrContainer}>
             <View style={styles.qrWrapper}>
-              {wallet?.address ? (
+              {address ? (
                 <QRCode
-                  value={`bitcoin:${wallet.address}`}
+                  value={`bitcoin:${address}`}
                   size={200}
-                  backgroundColor="white"
-                  color="black"
+                  backgroundColor={colors.white}
+                  color={colors.black}
                 />
               ) : (
                 <View style={styles.qrPlaceholder}>
@@ -86,60 +79,49 @@ export function ReceiveScreen({ onBack }: ReceiveScreenProps) {
 
           {/* Address Display */}
           <View style={styles.addressSection}>
-            <Text style={styles.addressLabel}>Your Bitcoin Address</Text>
-            <View style={styles.addressBox}>
-              <Text style={styles.addressText} selectable>
-                {wallet?.address || 'Loading...'}
+            <Text style={styles.addressLabel}>YOUR ADDRESS</Text>
+            <TouchableOpacity onPress={handleCopy} style={styles.addressCard}>
+              <Text style={styles.addressText} numberOfLines={2}>
+                {address || '...'}
               </Text>
-            </View>
-
-            {/* Address Type Badge */}
-            <View style={styles.addressType}>
-              <Ionicons name="shield-checkmark" size={14} color="#f7931a" />
-              <Text style={styles.addressTypeText}>Taproot (P2TR)</Text>
-            </View>
+              <Ionicons
+                name={copied ? 'checkmark-circle' : 'copy-outline'}
+                size={20}
+                color={copied ? colors.success : colors.textMuted}
+              />
+            </TouchableOpacity>
           </View>
 
-          {/* Action Buttons */}
+          {/* Actions */}
           <View style={styles.actions}>
-            <TouchableOpacity style={styles.actionButton} onPress={handleCopy}>
-              <LinearGradient
-                colors={copied ? ['#10b981', '#059669'] : ['#f7931a', '#e67e00']}
-                style={styles.actionButtonGradient}
-              >
-                <Ionicons
-                  name={copied ? 'checkmark' : 'copy'}
-                  size={20}
-                  color="#fff"
-                />
-                <Text style={styles.actionButtonText}>
-                  {copied ? 'Copied!' : 'Copy Address'}
-                </Text>
-              </LinearGradient>
+            <TouchableOpacity style={styles.actionButton} onPress={handleCopy} activeOpacity={0.8}>
+              <Ionicons name="copy" size={20} color={colors.buttonPrimaryText} />
+              <Text style={styles.actionButtonText}>{copied ? 'Copied!' : 'Copy'}</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
-              <Ionicons name="share-outline" size={20} color="#f7931a" />
-              <Text style={styles.shareButtonText}>Share</Text>
+            <TouchableOpacity style={styles.actionButtonAlt} onPress={handleShare} activeOpacity={0.8}>
+              <Ionicons name="share-outline" size={20} color={colors.textPrimary} />
+              <Text style={styles.actionButtonTextAlt}>Share</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Info Notice */}
+          {/* Notice */}
           <View style={styles.notice}>
-            <Ionicons name="information-circle" size={20} color="#3b82f6" />
+            <Ionicons name="information-circle" size={20} color={colors.textMuted} />
             <Text style={styles.noticeText}>
               Only send Bitcoin (BTC) to this address. Sending other assets may result in permanent loss.
             </Text>
           </View>
         </View>
       </SafeAreaView>
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: colors.background,
   },
   safeArea: {
     flex: 1,
@@ -151,7 +133,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
+    borderBottomColor: colors.border,
   },
   backButton: {
     padding: 8,
@@ -159,7 +141,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.textPrimary,
   },
   headerRight: {
     width: 40,
@@ -170,118 +152,101 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   qrContainer: {
-    marginVertical: 32,
+    marginVertical: 30,
   },
   qrWrapper: {
     padding: 20,
-    backgroundColor: 'white',
+    backgroundColor: colors.white,
     borderRadius: 20,
-    shadowColor: '#f7931a',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 10,
   },
   qrPlaceholder: {
     width: 200,
     height: 200,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f0f0f0',
   },
   qrPlaceholderText: {
-    color: '#888',
+    color: colors.textMuted,
   },
   addressSection: {
     width: '100%',
-    alignItems: 'center',
     marginBottom: 24,
   },
   addressLabel: {
-    fontSize: 14,
-    color: '#888',
-    marginBottom: 12,
-  },
-  addressBox: {
-    width: '100%',
-    padding: 16,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  addressText: {
-    fontSize: 13,
-    color: '#fff',
-    fontFamily: 'monospace',
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textMuted,
+    marginBottom: 10,
+    letterSpacing: 1,
     textAlign: 'center',
-    lineHeight: 20,
   },
-  addressType: {
+  addressCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 12,
-    gap: 6,
+    backgroundColor: colors.backgroundCard,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  addressTypeText: {
-    fontSize: 12,
-    color: '#f7931a',
+  addressText: {
+    flex: 1,
+    fontSize: 14,
     fontWeight: '500',
+    color: colors.textPrimary,
+    fontFamily: 'monospace',
+    marginRight: 10,
   },
   actions: {
+    flexDirection: 'row',
+    gap: 12,
     width: '100%',
     marginBottom: 24,
   },
   actionButton: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginBottom: 12,
-    shadowColor: '#f7931a',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  actionButtonGradient: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
+    backgroundColor: colors.buttonPrimary,
+    paddingVertical: 14,
+    borderRadius: 12,
     gap: 8,
   },
   actionButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.buttonPrimaryText,
   },
-  shareButton: {
+  actionButtonAlt: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 14,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: 'rgba(247,147,26,0.4)',
+    borderRadius: 12,
     gap: 8,
+    borderWidth: 1.5,
+    borderColor: colors.buttonSecondaryBorder,
   },
-  shareButtonText: {
+  actionButtonTextAlt: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#f7931a',
+    color: colors.buttonSecondaryText,
   },
   notice: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(59,130,246,0.1)',
+    backgroundColor: colors.backgroundCard,
     borderRadius: 12,
-    padding: 14,
-    gap: 10,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   noticeText: {
     flex: 1,
-    fontSize: 12,
-    color: '#888',
+    fontSize: 13,
+    color: colors.textMuted,
+    marginLeft: 10,
     lineHeight: 18,
   },
 });
-

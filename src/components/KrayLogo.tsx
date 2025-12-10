@@ -1,11 +1,12 @@
 /**
- * Kray Logo Component
- * SVG logo for KRAY OS / KrayWallet
+ * KRAY Logo Component
+ * The official KRAY triangle/diamond logo
  */
 
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Platform } from 'react-native';
 import Svg, { G, Path } from 'react-native-svg';
+import colors from '../theme/colors';
 
 interface KrayLogoProps {
   size?: number;
@@ -15,20 +16,18 @@ interface KrayLogoProps {
 }
 
 export function KrayLogo({ 
-  size = 80, 
-  color = '#FFFFFF',
-  backgroundColor = '#000000',
+  size = 100, 
+  color = colors.black,
+  backgroundColor = colors.white,
   showBackground = true 
 }: KrayLogoProps) {
-  // Aspect ratio from original SVG (1018.3 / 1062.92)
+  const svgSize = size * 0.55;
   const aspectRatio = 1018.3 / 1062.92;
-  const svgSize = size * 0.6; // Logo occupies 60% of container
-  const svgHeight = svgSize * aspectRatio;
 
-  const logo = (
+  const logoSvg = (
     <Svg
       width={svgSize}
-      height={svgHeight}
+      height={svgSize * aspectRatio}
       viewBox="0 0 1062.92 1018.3"
     >
       <G>
@@ -41,7 +40,7 @@ export function KrayLogo({
   );
 
   if (!showBackground) {
-    return logo;
+    return logoSvg;
   }
 
   return (
@@ -51,10 +50,10 @@ export function KrayLogo({
         width: size,
         height: size,
         backgroundColor,
-        borderRadius: size * 0.2, // 20% border radius like app icon
+        borderRadius: size * 0.22,
       }
     ]}>
-      {logo}
+      {logoSvg}
     </View>
   );
 }
@@ -63,13 +62,22 @@ const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#fff',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 20,
-    elevation: 10,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#fff',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.25,
+        shadowRadius: 25,
+      },
+      android: {
+        elevation: 10,
+      },
+      web: {
+        // @ts-ignore
+        boxShadow: '0 0 40px rgba(255,255,255,0.25)',
+      },
+    }),
   },
 });
 
 export default KrayLogo;
-

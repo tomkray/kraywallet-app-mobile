@@ -1,7 +1,6 @@
 /**
  * Welcome Screen
- * First screen when no wallet exists
- * KRAY OS Style - Black & White with KRAY Logo
+ * KRAY OS Style - Black & White
  */
 
 import React from 'react';
@@ -11,43 +10,26 @@ import {
   StyleSheet,
   TouchableOpacity,
   SafeAreaView,
-  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { KrayLogo } from '../components/KrayLogo';
+import colors from '../theme/colors';
 
 interface WelcomeScreenProps {
   onCreateWallet: () => void;
   onRestoreWallet: () => void;
 }
 
-// KRAY Logo Text Component (works on all platforms)
-function KrayLogoText() {
-  return (
-    <Text style={{
-      fontSize: 48,
-      fontWeight: '900',
-      color: '#000',
-      fontFamily: Platform.OS === 'web' ? 'system-ui, -apple-system, sans-serif' : undefined,
-    }}>
-      K
-    </Text>
-  );
-}
-
 export function WelcomeScreen({ onCreateWallet, onRestoreWallet }: WelcomeScreenProps) {
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        {/* Main Content */}
         <View style={styles.content}>
           {/* KRAY Logo */}
           <View style={styles.logoContainer}>
-            <View style={styles.logoCircle}>
-              <KrayLogoText />
-            </View>
+            <KrayLogo size={100} />
           </View>
 
-          {/* Title */}
           <Text style={styles.title}>KrayWallet</Text>
           <Text style={styles.subtitle}>Your Sovereign Bitcoin Wallet</Text>
 
@@ -66,7 +48,7 @@ export function WelcomeScreen({ onCreateWallet, onRestoreWallet }: WelcomeScreen
               onPress={onCreateWallet}
               activeOpacity={0.8}
             >
-              <Ionicons name="add-circle" size={20} color="#000" />
+              <Ionicons name="add-circle" size={20} color={colors.buttonPrimaryText} />
               <Text style={styles.buttonText}>Create New Wallet</Text>
             </TouchableOpacity>
 
@@ -75,13 +57,12 @@ export function WelcomeScreen({ onCreateWallet, onRestoreWallet }: WelcomeScreen
               onPress={onRestoreWallet}
               activeOpacity={0.8}
             >
-              <Ionicons name="key" size={18} color="#fff" />
+              <Ionicons name="key" size={18} color={colors.buttonSecondaryText} />
               <Text style={styles.secondaryButtonText}>Restore Wallet</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Footer */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>🔒 Your keys, your Bitcoin</Text>
         </View>
@@ -93,7 +74,7 @@ export function WelcomeScreen({ onCreateWallet, onRestoreWallet }: WelcomeScreen
 function FeatureItem({ icon, text }: { icon: string; text: string }) {
   return (
     <View style={styles.featureItem}>
-      <Ionicons name={icon as any} size={18} color="#fff" />
+      <Ionicons name={icon as any} size={18} color={colors.textPrimary} />
       <Text style={styles.featureText}>{text}</Text>
     </View>
   );
@@ -102,7 +83,7 @@ function FeatureItem({ icon, text }: { icon: string; text: string }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: colors.background,
   },
   safeArea: {
     flex: 1,
@@ -112,65 +93,41 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
-    paddingTop: 20,
   },
   logoContainer: {
     marginBottom: 24,
   },
-  logoCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 24,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#fff',
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.3,
-        shadowRadius: 20,
-      },
-      android: {
-        elevation: 10,
-      },
-      web: {
-        boxShadow: '0 0 30px rgba(255,255,255,0.3)',
-      },
-    }),
-  },
   title: {
     fontSize: 32,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontWeight: '700',
+    color: colors.textPrimary,
     marginBottom: 6,
-    letterSpacing: 1,
+    letterSpacing: 0.5,
   },
   subtitle: {
     fontSize: 14,
-    color: '#666',
-    marginBottom: 32,
-    letterSpacing: 0.5,
+    color: colors.textMuted,
+    marginBottom: 36,
   },
   features: {
     width: '100%',
-    marginBottom: 32,
+    marginBottom: 36,
   },
   featureItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    backgroundColor: colors.backgroundCard,
     borderRadius: 12,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: colors.border,
   },
   featureText: {
     fontSize: 15,
-    color: '#fff',
-    marginLeft: 12,
+    color: colors.textPrimary,
+    marginLeft: 14,
     fontWeight: '500',
   },
   buttons: {
@@ -180,7 +137,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: colors.buttonPrimary,
     paddingVertical: 16,
     paddingHorizontal: 24,
     borderRadius: 14,
@@ -188,8 +145,8 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     fontSize: 17,
-    fontWeight: '700',
-    color: '#000',
+    fontWeight: '600',
+    color: colors.buttonPrimaryText,
     marginLeft: 10,
   },
   secondaryButton: {
@@ -200,13 +157,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     borderRadius: 14,
     borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-    backgroundColor: 'transparent',
+    borderColor: colors.buttonSecondaryBorder,
+    backgroundColor: colors.buttonSecondary,
   },
   secondaryButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
+    color: colors.buttonSecondaryText,
     marginLeft: 10,
   },
   footer: {
@@ -215,6 +172,6 @@ const styles = StyleSheet.create({
   },
   footerText: {
     fontSize: 13,
-    color: '#555',
+    color: colors.textDark,
   },
 });

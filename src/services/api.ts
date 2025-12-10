@@ -13,6 +13,9 @@ const L2_API_URLS = {
   local: 'http://localhost:5002',
 };
 
+// KRAY OS Server API (Umbrel node - for wallet persistence)
+const KRAY_OS_API = 'http://100.112.128.105:3422';
+
 let API_URL = API_URLS.production;
 let L2_API_URL = L2_API_URLS.production;
 
@@ -73,14 +76,27 @@ export async function restoreWallet(mnemonic: string): Promise<{
   address: string;
   publicKey: string;
 }> {
+  console.log('🔄 Restoring wallet with mnemonic:', mnemonic.split(' ').length, 'words');
+  console.log('🌐 API URL:', API_URL);
+  
   const res = await fetch(`${API_URL}/api/kraywallet/restore`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mnemonic }),
   });
   
-  if (!res.ok) throw new Error('Failed to restore wallet');
-  return res.json();
+  console.log('📡 Response status:', res.status);
+  
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error('❌ Restore error:', errorText);
+    throw new Error('Failed to restore wallet: ' + errorText);
+  }
+  
+  const data = await res.json();
+  console.log('✅ Restore success:', data);
+  
+  return data;
 }
 
 // Get Address Balance
@@ -156,96 +172,510 @@ export async function getFeeRates(): Promise<{
   }
 }
 
-// Get Ordinals (Inscriptions)
+// QuickNode endpoint
+const QUICKNODE_URL = 'https://black-wider-sound.btc.quiknode.pro/e035aecc0a995c24e4ae490ab333bc6f4a2a08c5';
+
+// Xverse API Key
+const XVERSE_API_KEY = 'ad3d8d8b-171d-4b11-9fba-5d0a78948531';
+
+// Get Ordinals (Inscriptions) - Using Xverse API (primary) with Hiro fallback
 export async function getOrdinals(address: string): Promise<any[]> {
   try {
-    const res = await fetch(`${API_URL}/api/ordinals/${address}`);
-    if (!res.ok) throw new Error('Failed to fetch ordinals');
-    return res.json();
+    console.log('🔍 Fetching ordinals for:', address);
+    
+    // Primary: Xverse API - reliable and has API key
+    const url = `https://api.xverse.app/v1/address/${address}/ordinal-utxo`;
+    console.log('📡 Calling Xverse API:', url);
+    
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'x-api-key': XVERSE_API_KEY,
+      },
+    });
+    
+    console.log('📡 Xverse response status:', res.status);
+    
+    if (!res.ok) {
+      console.error('❌ Xverse API error:', res.status, res.statusText);
+      return await getOrdinalsFromHiro(address);
+    }
+    
+    const data = await res.json();
+    console.log('📦 Xverse data received, total UTXOs:', data.total);
+    
+    const utxos = data.results || [];
+    
+    // Extract inscriptions from UTXOs
+    const allInscriptions: any[] = [];
+    for (const utxo of utxos) {
+      if (utxo.inscriptions && utxo.inscriptions.length > 0) {
+        console.log(`📍 UTXO ${utxo.txid}:${utxo.vout} has ${utxo.inscriptions.length} inscriptions`);
+        for (const inscription of utxo.inscriptions) {
+          allInscriptions.push({
+            ...inscription,
+            utxoTxid: utxo.txid,
+            utxoVout: utxo.vout,
+            utxoValue: utxo.value,
+          });
+        }
+      }
+    }
+    
+    console.log('✅ Total Ordinals found from Xverse:', allInscriptions.length);
+    
+    // Get detailed info for each inscription from Hiro (includes number, content_type, etc)
+    const detailedInscriptions = await Promise.all(
+      allInscriptions.map(async (inscription: any) => {
+        const inscriptionId = inscription.id;
+        let number = null;
+        let contentType = inscription.content_type || 'image/png';
+        
+        try {
+          // Fetch inscription details from Hiro for number and content_type
+          const detailRes = await fetch(`https://api.hiro.so/ordinals/v1/inscriptions/${inscriptionId}`);
+          if (detailRes.ok) {
+            const detail = await detailRes.json();
+            number = detail.number;
+            contentType = detail.content_type || contentType;
+            console.log(`📋 Inscription #${number}: ${inscriptionId}`);
+          }
+        } catch (e) {
+          console.log('Could not fetch inscription details:', inscriptionId);
+        }
+        
+        // ordinals.com for reliable content display
+        const preview = `https://ordinals.com/preview/${inscriptionId}`;
+        const content = `https://ordinals.com/content/${inscriptionId}`;
+        
+        return {
+          id: inscriptionId,
+          number: number,
+          contentType: contentType,
+          contentLength: 0,
+          genesisTimestamp: null,
+          genesisBlockHeight: null,
+          genesisTxId: inscriptionId.split('i')[0],
+          location: `${inscription.utxoTxid}:${inscription.utxoVout}:${inscription.offset || 0}`,
+          output: `${inscription.utxoTxid}:${inscription.utxoVout}`,
+          value: inscription.utxoValue,
+          satoshi: null,
+          preview: preview,
+          content: content,
+          thumbnail: content, // Use content URL (actual image) not preview (HTML)
+        };
+      })
+    );
+    
+    console.log('✅ Formatted inscriptions with details:', detailedInscriptions.length);
+    return detailedInscriptions;
   } catch (error) {
-    console.error('Error fetching ordinals:', error);
+    console.error('❌ Error fetching ordinals from Xverse:', error);
+    return await getOrdinalsFromHiro(address);
+  }
+}
+
+// Fallback: Get Ordinals from Hiro API
+async function getOrdinalsFromHiro(address: string): Promise<any[]> {
+  try {
+    console.log('🔄 Trying Hiro API fallback...');
+    const res = await fetch(`https://api.hiro.so/ordinals/v1/inscriptions?address=${address}&limit=60`);
+    if (!res.ok) {
+      console.error('❌ Hiro API also failed:', res.status);
+      return [];
+    }
+    
+    const data = await res.json();
+    console.log('✅ Ordinals found (Hiro):', data.results?.length || 0);
+    
+    return (data.results || []).map((inscription: any) => {
+      const inscriptionId = inscription.id;
+      const preview = `https://ordinals.com/preview/${inscriptionId}`;
+      const content = `https://ordinals.com/content/${inscriptionId}`;
+      
+      return {
+        id: inscriptionId,
+        number: inscription.number,
+        contentType: inscription.content_type || 'image/png',
+        contentLength: inscription.content_length,
+        genesisTimestamp: inscription.genesis_timestamp,
+        genesisBlockHeight: inscription.genesis_block_height,
+        genesisTxId: inscription.genesis_tx_id,
+        location: inscription.location,
+        output: inscription.output,
+        value: inscription.value,
+        satoshi: inscription.sat_ordinal,
+        preview: preview,
+        content: content,
+        thumbnail: content, // Use content URL (actual image) not preview (HTML)
+      };
+    });
+  } catch (error) {
+    console.error('❌ Error fetching ordinals from Hiro:', error);
     return [];
   }
 }
 
-// Get Runes
+// Get Runes - Using backend API (QuickNode) for UTXOs
+// IMPORTANT: Backend returns utxos needed for send transactions!
 export async function getRunes(address: string): Promise<any[]> {
   try {
-    const res = await fetch(`${API_URL}/api/runes/${address}`);
-    if (!res.ok) throw new Error('Failed to fetch runes');
-    return res.json();
+    console.log('🔍 Fetching runes for:', address);
+    
+    // Use backend API that returns UTXOs (required for send transactions)
+    // This uses QuickNode under the hood
+    const res = await fetch(`${API_URL}/api/runes/fast/${address}`, {
+      headers: {
+        'Accept': 'application/json',
+      }
+    });
+    
+    if (!res.ok) {
+      console.error('Backend Runes API failed:', res.status);
+      // Fallback to Hiro if backend fails (but won't have UTXOs)
+      return await getRunesFallback(address);
+    }
+    
+    const data = await res.json();
+    
+    if (!data.success || !data.runes) {
+      console.log('⚠️ No runes from backend, trying fallback');
+      return await getRunesFallback(address);
+    }
+    
+    const runes = data.runes;
+    console.log('✅ Runes found from backend:', runes.length);
+    
+    // Map backend response to our format (includes UTXOs!)
+    return runes.map((rune: any) => ({
+      id: rune.runeId || rune.name, // Use runeId if available
+      name: rune.name,
+      symbol: rune.symbol || '◆',
+      amount: String(rune.amount),
+      balance: rune.amount,
+      rawAmount: rune.rawAmount,
+      divisibility: rune.divisibility || 0,
+      formattedAmount: rune.amount?.toLocaleString(),
+      thumbnail: rune.thumbnail || rune.parentPreview || '',
+      etching: '',
+      // ✅ CRITICAL: Include UTXOs for send transactions!
+      utxos: rune.utxos || [],
+      runeId: rune.runeId,
+    }));
   } catch (error) {
-    console.error('Error fetching runes:', error);
+    console.error('Error fetching runes from backend:', error);
+    return await getRunesFallback(address);
+  }
+}
+
+// Fallback: Hiro API (doesn't have UTXOs - send won't work!)
+async function getRunesFallback(address: string): Promise<any[]> {
+  try {
+    console.log('⚠️ Using Hiro fallback (no UTXOs - send may fail)');
+    
+    const res = await fetch(`https://api.hiro.so/runes/v1/addresses/${address}/balances`, {
+      headers: {
+        'Accept': 'application/json',
+      }
+    });
+    
+    if (!res.ok) {
+      console.error('Hiro Runes API failed:', res.status);
+      return [];
+    }
+    
+    const data = await res.json();
+    const runesList = data.results || [];
+    
+    // Filter out zero balance runes
+    const activeRunes = runesList.filter((r: any) => parseFloat(r.balance) > 0);
+    
+    console.log('✅ Runes found (Hiro fallback):', activeRunes.length);
+    
+    // Fetch full rune info from Hiro for each rune (includes symbol and etching)
+    const runesWithDetails = await Promise.all(
+      activeRunes.map(async (runeData: any) => {
+        const rune = runeData.rune;
+        let thumbnail = '';
+        let etching = '';
+        let symbol = '◆';
+        let divisibility = 0;
+        
+        try {
+          // Get detailed rune info from Hiro
+          const infoRes = await fetch(`https://api.hiro.so/runes/v1/etchings/${rune.id}`, {
+            headers: { 'Accept': 'application/json' }
+          });
+          
+          if (infoRes.ok) {
+            const infoData = await infoRes.json();
+            symbol = infoData.symbol || '◆';
+            divisibility = infoData.divisibility || 0;
+            etching = infoData.location?.tx_id || '';
+            
+            if (etching) {
+              // Use ordinals.com for the etching inscription as thumbnail
+              thumbnail = `https://ordinals.com/content/${etching}i0`;
+            }
+          }
+        } catch (e) {
+          console.log('Could not fetch rune details:', rune.id);
+        }
+        
+        // Parse balance with divisibility
+        const balanceStr = runeData.balance || '0';
+        const balanceNum = parseFloat(balanceStr);
+        
+        return {
+          id: rune.id,
+          name: rune.spaced_name || rune.name,
+          symbol: symbol,
+          amount: balanceStr,
+          balance: balanceNum,
+          divisibility: divisibility,
+          formattedAmount: balanceNum.toLocaleString(),
+          thumbnail: thumbnail,
+          etching: etching,
+          // ⚠️ No UTXOs from Hiro - send will fail!
+          utxos: [],
+          runeId: rune.id,
+        };
+      })
+    );
+    
+    return runesWithDetails;
+  } catch (error) {
+    console.error('Error fetching runes (fallback):', error);
     return [];
   }
 }
 
-// Create Transaction
+// PSBT Details interface
+export interface PSBTDetails {
+  psbt: string;
+  fee: number;
+  feeRate: number;
+  virtualSize: number;
+  inputs: Array<{
+    txid: string;
+    vout: number;
+    value: number;
+    address?: string;
+  }>;
+  outputs: Array<{
+    address: string;
+    value: number;
+  }>;
+}
+
+// Create Transaction Preview (calculates fee and returns details for confirmation modal)
+// Note: This doesn't call the backend - just prepares the preview
 export async function createTransaction(params: {
   fromAddress: string;
   toAddress: string;
   amount: number;
   feeRate: number;
   utxos: any[];
-}): Promise<{ psbt: string; fee: number }> {
-  const res = await fetch(`${API_URL}/api/kraywallet/create-tx`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
+}): Promise<PSBTDetails> {
+  // Estimate transaction size for Taproot
+  // P2TR input: ~57.5 vbytes, P2TR output: ~43 vbytes, overhead: ~10.5 vbytes
+  const numInputs = Math.min(params.utxos.length, 10); // Use up to 10 UTXOs
+  const estimatedVsize = Math.ceil(numInputs * 57.5 + 2 * 43 + 10.5);
+  const estimatedFee = Math.max(estimatedVsize * params.feeRate, 350); // Min 350 sats
+  
+  const totalInputs = params.utxos.reduce((sum: number, u: any) => sum + (u.value || 0), 0);
+  const change = totalInputs - params.amount - estimatedFee;
+  
+  console.log('📊 Transaction preview:', {
+    inputs: numInputs,
+    vsize: estimatedVsize,
+    fee: estimatedFee,
+    change: change,
   });
   
-  if (!res.ok) throw new Error('Failed to create transaction');
-  return res.json();
+  return {
+    psbt: '', // Will be created by backend on send
+    fee: estimatedFee,
+    feeRate: params.feeRate,
+    virtualSize: estimatedVsize,
+    inputs: params.utxos.slice(0, numInputs).map((u: any) => ({
+      txid: u.txid,
+      vout: u.vout,
+      value: u.value,
+      address: params.fromAddress,
+    })),
+    outputs: [
+      { address: params.toAddress, value: params.amount },
+      ...(change > 546 ? [{ address: params.fromAddress, value: change }] : []),
+    ],
+  };
 }
 
-// Sign and Broadcast Transaction
+// Send Bitcoin Transaction - uses /api/kraywallet/send endpoint
+// This endpoint creates, signs, and returns the transaction hex
+// Flow identical to KrayWallet Extension Prod
 export async function signAndBroadcast(params: {
-  psbt: string;
   mnemonic: string;
-}): Promise<{ txid: string }> {
-  const res = await fetch(`${API_URL}/api/kraywallet/sign-broadcast`, {
+  toAddress: string;
+  amount: number;
+  feeRate: number;
+}): Promise<{ txid: string; txHex: string; fee: number; change: number }> {
+  console.log('📤 Calling /api/kraywallet/send...');
+  console.log('  To:', params.toAddress);
+  console.log('  Amount:', params.amount, 'sats');
+  console.log('  Fee rate:', params.feeRate, 'sat/vB');
+  
+  // Step 1: Create and sign transaction (same as extension prod)
+  const res = await fetch(`${API_URL}/api/kraywallet/send`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
+    body: JSON.stringify({
+      mnemonic: params.mnemonic,
+      toAddress: params.toAddress,
+      amount: params.amount,
+      feeRate: params.feeRate,
+      network: 'mainnet',
+    }),
   });
   
-  if (!res.ok) throw new Error('Failed to sign/broadcast transaction');
-  return res.json();
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ error: 'Failed to create transaction' }));
+    throw new Error(error.error || error.message || 'Failed to create transaction');
+  }
+  
+  const data = await res.json();
+  
+  if (!data.success) {
+    throw new Error(data.error || 'Failed to create transaction');
+  }
+  
+  console.log('✅ Transaction created');
+  console.log('  TXID:', data.txid);
+  console.log('  Fee:', data.fee, 'sats');
+  console.log('  Change:', data.change, 'sats');
+  
+  // Step 2: Broadcast transaction using backend endpoint (same as extension prod)
+  console.log('📡 Broadcasting transaction via /api/psbt/broadcast...');
+  
+  const broadcastRes = await fetch(`${API_URL}/api/psbt/broadcast`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      hex: data.txHex,
+    }),
+  });
+  
+  const broadcastData = await broadcastRes.json();
+  
+  if (!broadcastData.success) {
+    // Fallback to mempool.space if backend broadcast fails
+    console.log('⚠️ Backend broadcast failed, trying mempool.space...');
+    const mempoolRes = await fetch('https://mempool.space/api/tx', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: data.txHex,
+    });
+    
+    if (!mempoolRes.ok) {
+      const mempoolError = await mempoolRes.text();
+      throw new Error(`Broadcast failed: ${broadcastData.error || mempoolError}`);
+    }
+    
+    const mempoolTxid = await mempoolRes.text();
+    console.log('✅ Transaction broadcast via mempool.space:', mempoolTxid);
+    
+    return {
+      txid: mempoolTxid,
+      txHex: data.txHex,
+      fee: data.fee,
+      change: data.change,
+    };
+  }
+  
+  console.log('✅ Transaction broadcast!');
+  console.log('  TXID:', broadcastData.txid);
+  
+  return {
+    txid: broadcastData.txid,
+    txHex: data.txHex,
+    fee: data.fee,
+    change: data.change,
+  };
 }
 
 // ========== L2 API ==========
+// Using official KrayWallet backend endpoints
 
-// Check L2 Health
-export async function checkL2Health(): Promise<boolean> {
+// L2 Health Info (includes bridge address)
+export interface L2HealthInfo {
+  status: string;
+  network: string;
+  version: string;
+  bridge_address: string;
+  withdrawal_processor: {
+    active: boolean;
+    challenge_period_hours: number;
+  };
+  solvency: {
+    solvent: boolean;
+    status: string;
+  };
+}
+
+let cachedL2Health: L2HealthInfo | null = null;
+
+// Get L2 Health/Config (includes bridge address for deposits)
+export async function getL2Health(): Promise<L2HealthInfo | null> {
   try {
     const res = await fetch(`${L2_API_URL}/health`, {
       method: 'GET',
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(10000),
     });
     if (res.ok) {
-      const data = await res.json();
-      return data.status === 'healthy';
+      cachedL2Health = await res.json();
+      console.log('✅ L2 Health:', cachedL2Health?.status);
+      return cachedL2Health;
     }
-    return false;
+    return null;
   } catch (error) {
-    return false;
+    console.error('Error fetching L2 health:', error);
+    return null;
   }
+}
+
+// Check L2 Health
+export async function checkL2Health(): Promise<boolean> {
+  const health = await getL2Health();
+  return health?.status === 'healthy';
+}
+
+// Get Bridge Deposit Address
+export async function getBridgeDepositAddress(): Promise<string> {
+  if (cachedL2Health?.bridge_address) {
+    return cachedL2Health.bridge_address;
+  }
+  const health = await getL2Health();
+  return health?.bridge_address || 'bc1pxtt3tzrcp4zxy5z43vzhwac47dc6tl4s6l0gfdyuzvx66ljr3x7srwetnd';
 }
 
 // Get L2 Balance
 export async function getL2Balance(address: string): Promise<{
-  balance_kray: number;
-  balance_dog?: number;
-  balance_dogsocial?: number;
-  balance_radiola?: number;
+  balance: string;
+  balance_kray: string;
+  staked: string;
+  available: string;
+  nonce: number;
 }> {
   try {
     const res = await fetch(`${L2_API_URL}/account/${address}/balance`);
     if (!res.ok) throw new Error('Failed to fetch L2 balance');
-    return res.json();
+    const data = await res.json();
+    console.log('✅ L2 Balance:', data);
+    return data;
   } catch (error) {
     console.error('Error fetching L2 balance:', error);
-    return { balance_kray: 0 };
+    return { balance: '0', balance_kray: '0', staked: '0', available: '0', nonce: 0 };
   }
 }
 
@@ -254,106 +684,611 @@ export async function getL2Transactions(address: string): Promise<any[]> {
   try {
     const res = await fetch(`${L2_API_URL}/account/${address}/transactions`);
     if (!res.ok) throw new Error('Failed to fetch L2 transactions');
-    return res.json();
+    const data = await res.json();
+    console.log('✅ L2 Transactions:', data.transactions?.length || 0);
+    return data.transactions || [];
   } catch (error) {
     console.error('Error fetching L2 transactions:', error);
     return [];
   }
 }
 
-// L2 Deposit Request
-export async function requestL2Deposit(address: string, amount: number): Promise<{
-  depositAddress: string;
-  depositId: string;
+// Get L2 Membership
+export async function getL2Membership(address: string): Promise<{
+  tier: string;
+  name: string;
+  emoji: string;
+  color: string;
+  limits: {
+    freeTxPerDay: number;
+    maxTxPerHour: number;
+    minBalanceToSend: number;
+  };
+  usage: {
+    dailyUsed: number;
+    dailyRemaining: number;
+  };
 }> {
-  const res = await fetch(`${L2_API_URL}/deposit/request`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ address, amount }),
-  });
-  
-  if (!res.ok) throw new Error('Failed to request deposit');
-  return res.json();
+  try {
+    const res = await fetch(`${L2_API_URL}/account/${address}/membership`);
+    if (!res.ok) throw new Error('Failed to fetch membership');
+    const data = await res.json();
+    console.log('✅ L2 Membership:', data.membership?.tier);
+    return {
+      tier: data.membership?.tier || 'none',
+      name: data.membership?.name || 'No Membership',
+      emoji: data.membership?.emoji || '👤',
+      color: data.membership?.color || '#444444',
+      limits: data.limits || { freeTxPerDay: 0, maxTxPerHour: 10, minBalanceToSend: 10 },
+      usage: data.usage || { dailyUsed: 0, dailyRemaining: 0 },
+    };
+  } catch (error) {
+    console.error('Error fetching membership:', error);
+    return {
+      tier: 'none',
+      name: 'No Membership',
+      emoji: '👤',
+      color: '#444444',
+      limits: { freeTxPerDay: 0, maxTxPerHour: 10, minBalanceToSend: 10 },
+      usage: { dailyUsed: 0, dailyRemaining: 0 },
+    };
+  }
 }
 
-// L2 Withdraw
-export async function requestL2Withdraw(params: {
-  address: string;
-  toAddress: string;
-  amount: number;
-  signature: string;
-}): Promise<{ withdrawId: string }> {
-  const res = await fetch(`${L2_API_URL}/withdraw/request`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  
-  if (!res.ok) throw new Error('Failed to request withdrawal');
-  return res.json();
-}
-
-// L2 Transfer
+// L2 Transfer (POST to backend)
 export async function l2Transfer(params: {
   fromAddress: string;
   toAddress: string;
   amount: number;
   token: string;
-  signature: string;
-}): Promise<{ txId: string }> {
+}): Promise<{ tx_hash: string; success: boolean }> {
   const res = await fetch(`${L2_API_URL}/transfer`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
+    body: JSON.stringify({
+      from: params.fromAddress,
+      to: params.toAddress,
+      amount: params.amount.toString(),
+      token: params.token,
+    }),
   });
   
-  if (!res.ok) throw new Error('Failed to transfer');
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.message || 'Failed to transfer');
+  }
   return res.json();
 }
 
-// L2 Swap
-export async function l2Swap(params: {
+// L2 Withdraw (POST to backend)
+export async function requestL2Withdraw(params: {
   address: string;
-  fromToken: string;
-  toToken: string;
   amount: number;
-  signature: string;
-}): Promise<{ txId: string; received: number }> {
-  const res = await fetch(`${L2_API_URL}/swap`, {
+}): Promise<{ success: boolean; message?: string }> {
+  // Withdrawals go back to the same address (bridge requirement)
+  const res = await fetch(`${L2_API_URL}/withdraw`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
+    body: JSON.stringify({
+      from: params.address,
+      to: params.address, // Same address - bridge requirement
+      amount: params.amount.toString(),
+    }),
   });
   
-  if (!res.ok) throw new Error('Failed to swap');
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.message || 'Failed to request withdrawal');
+  }
   return res.json();
 }
 
-// Get L2 Membership
-export async function getL2Membership(address: string): Promise<{
-  tier: string;
-  freeTransactionsPerDay: number;
-  usedToday: number;
-}> {
-  try {
-    const res = await fetch(`${L2_API_URL}/account/${address}/membership`);
-    if (!res.ok) throw new Error('Failed to fetch membership');
-    return res.json();
-  } catch (error) {
-    return { tier: 'none', freeTransactionsPerDay: 0, usedToday: 0 };
-  }
-}
-
-// Get Pending Withdrawals
+// Get Pending Withdrawals - endpoint may not exist yet
 export async function getPendingWithdrawals(address: string): Promise<any[]> {
   try {
-    const res = await fetch(`${L2_API_URL}/withdraw/pending/${address}`);
-    if (!res.ok) throw new Error('Failed to fetch pending withdrawals');
-    return res.json();
+    // Try the withdrawals endpoint (may return 404)
+    const res = await fetch(`${L2_API_URL}/account/${address}/withdrawals`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.withdrawals || [];
   } catch (error) {
     return [];
   }
 }
 
-export { API_URL, L2_API_URL };
+// ========== SERVER WALLET PERSISTENCE (KRAY OS / Umbrel) ==========
+// Wallet is stored on the server, not in browser localStorage
+// This ensures the same wallet is accessible from any device
+
+/**
+ * Load wallet data from KRAY OS server
+ */
+export async function loadWalletFromServer(): Promise<{
+  exists: boolean;
+  data: {
+    encryptedMnemonic?: string;
+    address?: string;
+    publicKey?: string;
+    network?: string;
+  } | null;
+}> {
+  try {
+    console.log('📥 Loading wallet from server...');
+    const res = await fetch(`${KRAY_OS_API}/api/wallet/load`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    
+    if (!res.ok) {
+      console.error('❌ Server error loading wallet');
+      return { exists: false, data: null };
+    }
+    
+    const result = await res.json();
+    console.log('✅ Wallet load result:', result.exists ? 'Found' : 'Not found');
+    
+    return {
+      exists: result.exists,
+      data: result.data,
+    };
+  } catch (error) {
+    console.error('❌ Error loading wallet from server:', error);
+    return { exists: false, data: null };
+  }
+}
+
+/**
+ * Save wallet data to KRAY OS server
+ */
+export async function saveWalletToServer(data: {
+  encryptedMnemonic: string;
+  address: string;
+  publicKey: string;
+  network?: string;
+}): Promise<boolean> {
+  try {
+    console.log('💾 Saving wallet to server...');
+    const res = await fetch(`${KRAY_OS_API}/api/wallet/save`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    
+    if (!res.ok) {
+      console.error('❌ Server error saving wallet');
+      return false;
+    }
+    
+    console.log('✅ Wallet saved to server');
+    return true;
+  } catch (error) {
+    console.error('❌ Error saving wallet to server:', error);
+    return false;
+  }
+}
+
+/**
+ * Clear wallet data from KRAY OS server
+ */
+export async function clearWalletFromServer(): Promise<boolean> {
+  try {
+    console.log('🗑️ Clearing wallet from server...');
+    const res = await fetch(`${KRAY_OS_API}/api/wallet/clear`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    
+    if (!res.ok) {
+      console.error('❌ Server error clearing wallet');
+      return false;
+    }
+    
+    console.log('✅ Wallet cleared from server');
+    return true;
+  } catch (error) {
+    console.error('❌ Error clearing wallet from server:', error);
+    return false;
+  }
+}
+
+/**
+ * Check if wallet exists on server
+ */
+export async function checkWalletOnServer(): Promise<{
+  exists: boolean;
+  address: string | null;
+}> {
+  try {
+    const res = await fetch(`${KRAY_OS_API}/api/wallet/exists`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    
+    if (!res.ok) {
+      return { exists: false, address: null };
+    }
+    
+    const result = await res.json();
+    return {
+      exists: result.exists,
+      address: result.address,
+    };
+  } catch (error) {
+    console.error('Error checking wallet on server:', error);
+    return { exists: false, address: null };
+  }
+}
+
+// ========== ATOMIC SWAP / BUY NOW API (Same as Extension Prod) ==========
+// Endpoints: /api/atomic-swap/...
+
+export interface BuyNowListing {
+  order_id: string;
+  inscription_id: string;
+  seller_address: string;
+  price_sats: number;
+  status: 'OPEN' | 'PENDING' | 'SOLD' | 'CANCELLED';
+  created_at: string;
+  description?: string;
+}
+
+export interface AtomicSwapListing {
+  id: string;
+  inscription_id: string;
+  seller_address: string;
+  price_sats: number;
+  status: string;
+  psbt_base64?: string;
+}
+
+// Get All Atomic Swap Listings (same as extension prod)
+export async function getAtomicSwapListings(sellerAddress?: string): Promise<AtomicSwapListing[]> {
+  try {
+    const url = sellerAddress 
+      ? `${API_URL}/api/atomic-swap/?seller_address=${sellerAddress}`
+      : `${API_URL}/api/atomic-swap/`;
+    
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Object.values(data.listings || {});
+  } catch (error) {
+    console.error('Error fetching atomic swap listings:', error);
+    return [];
+  }
+}
+
+// Get Buy Now Listings (same as extension prod)
+export async function getBuyNowListings(inscriptionId?: string): Promise<BuyNowListing[]> {
+  try {
+    const url = inscriptionId
+      ? `${API_URL}/api/atomic-swap/buy-now?inscription_id=${inscriptionId}`
+      : `${API_URL}/api/atomic-swap/buy-now`;
+    
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.listings || [];
+  } catch (error) {
+    console.error('Error fetching buy now listings:', error);
+    return [];
+  }
+}
+
+// Get Single Buy Now Listing
+export async function getBuyNowListing(orderId: string): Promise<BuyNowListing | null> {
+  try {
+    const res = await fetch(`${API_URL}/api/atomic-swap/buy-now/${orderId}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.listing || null;
+  } catch (error) {
+    console.error('Error fetching buy now listing:', error);
+    return null;
+  }
+}
+
+// Create Buy Now Listing (same as extension prod)
+// Step 1: Create listing, get PSBT to sign
+// Step 2: Confirm with signed PSBT
+export async function createBuyNowListing(params: {
+  inscription_id: string;
+  price_sats: number;
+  seller_address: string;
+  description?: string;
+  order_id?: string; // For step 2
+  seller_signed_psbt?: string; // For step 2
+}): Promise<{ 
+  success: boolean; 
+  order_id?: string; 
+  psbt_base64?: string;
+  status?: string;
+  error?: string;
+}> {
+  const res = await fetch(`${API_URL}/api/atomic-swap/buy-now/list`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  
+  const data = await res.json();
+  
+  if (!res.ok) {
+    return { success: false, error: data.error || 'Failed to create listing' };
+  }
+  
+  return {
+    success: true,
+    order_id: data.order_id,
+    psbt_base64: data.psbt_base64,
+    status: data.status,
+  };
+}
+
+// Buy Now - Purchase (same as extension prod)
+export async function buyNowPurchase(params: {
+  orderId: string;
+  buyerAddress: string;
+  feeRate?: number;
+}): Promise<{ 
+  success: boolean; 
+  psbt_base64?: string;
+  required_sats?: number;
+  error?: string;
+}> {
+  const res = await fetch(`${API_URL}/api/atomic-swap/buy-now/${params.orderId}/buy`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      buyer_address: params.buyerAddress,
+      fee_rate: params.feeRate || 5,
+    }),
+  });
+  
+  const data = await res.json();
+  
+  if (!res.ok) {
+    return { success: false, error: data.error || 'Failed to create purchase PSBT' };
+  }
+  
+  return {
+    success: true,
+    psbt_base64: data.psbt_base64,
+    required_sats: data.required_sats,
+  };
+}
+
+// Confirm Buy Now Purchase (broadcasts the transaction)
+export async function confirmBuyNowPurchase(params: {
+  orderId: string;
+  buyerSignedPsbt: string;
+}): Promise<{ success: boolean; txid?: string; error?: string }> {
+  const res = await fetch(`${API_URL}/api/atomic-swap/buy-now/${params.orderId}/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      buyer_signed_psbt: params.buyerSignedPsbt,
+    }),
+  });
+  
+  const data = await res.json();
+  
+  if (!res.ok) {
+    return { success: false, error: data.error || 'Failed to confirm purchase' };
+  }
+  
+  return { success: true, txid: data.txid };
+}
+
+// Accept Buy Now (for seller to accept incoming purchase)
+export async function acceptBuyNowPurchase(params: {
+  orderId: string;
+  sellerSignedPsbt: string;
+}): Promise<{ success: boolean; txid?: string; error?: string }> {
+  const res = await fetch(`${API_URL}/api/atomic-swap/buy-now/${params.orderId}/accept`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      seller_signed_psbt: params.sellerSignedPsbt,
+    }),
+  });
+  
+  const data = await res.json();
+  
+  if (!res.ok) {
+    return { success: false, error: data.error || 'Failed to accept purchase' };
+  }
+  
+  return { success: true, txid: data.txid };
+}
+
+// Cancel Buy Now Listing (same as extension prod)
+export async function cancelBuyNowListing(params: {
+  orderId: string;
+  sellerAddress: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const res = await fetch(`${API_URL}/api/atomic-swap/buy-now/${params.orderId}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      seller_address: params.sellerAddress,
+    }),
+  });
+  
+  const data = await res.json();
+  
+  if (!res.ok) {
+    return { success: false, error: data.error || 'Failed to cancel listing' };
+  }
+  
+  return { success: true };
+}
+
+// Update Buy Now Price (same as extension prod)
+export async function updateBuyNowPrice(params: {
+  orderId: string;
+  newPrice: number;
+  sellerAddress: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const res = await fetch(`${API_URL}/api/atomic-swap/buy-now/${params.orderId}/price`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      new_price: params.newPrice,
+      seller_address: params.sellerAddress,
+    }),
+  });
+  
+  const data = await res.json();
+  
+  if (!res.ok) {
+    return { success: false, error: data.error || 'Failed to update price' };
+  }
+  
+  return { success: true };
+}
+
+// ========== LEGACY ATOMIC SWAP (Offer-based model) ==========
+
+// Create Atomic Swap Offer (legacy - offer model)
+export async function createAtomicSwapOffer(params: {
+  inscriptionId: string;
+  sellerAddress: string;
+  priceSats: number;
+}): Promise<{ success: boolean; order_id?: string; psbt_base64?: string; error?: string }> {
+  const res = await fetch(`${API_URL}/api/atomic-swap/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      inscription_id: params.inscriptionId,
+      seller_address: params.sellerAddress,
+      price_sats: params.priceSats,
+    }),
+  });
+  
+  const data = await res.json();
+  
+  if (!res.ok) {
+    return { success: false, error: data.error || 'Failed to create offer' };
+  }
+  
+  return { success: true, order_id: data.order_id, psbt_base64: data.psbt_base64 };
+}
+
+// Buy Atomic Swap (legacy - prepare purchase)
+export async function buyAtomicSwap(params: {
+  orderId: string;
+  buyerAddress: string;
+  feeRate?: number;
+}): Promise<{ success: boolean; psbt_base64?: string; error?: string }> {
+  const res = await fetch(`${API_URL}/api/atomic-swap/${params.orderId}/buy`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      buyer_address: params.buyerAddress,
+      fee_rate: params.feeRate || 5,
+    }),
+  });
+  
+  const data = await res.json();
+  
+  if (!res.ok) {
+    return { success: false, error: data.error || 'Failed to prepare purchase' };
+  }
+  
+  return { success: true, psbt_base64: data.psbt_base64 };
+}
+
+// Sign Atomic Swap PSBT
+export async function signAtomicSwapPsbt(params: {
+  orderId: string;
+  signedPsbt: string;
+}): Promise<{ success: boolean; signed_psbt?: string; error?: string }> {
+  const res = await fetch(`${API_URL}/api/atomic-swap/${params.orderId}/sign`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      signed_psbt: params.signedPsbt,
+    }),
+  });
+  
+  const data = await res.json();
+  
+  if (!res.ok) {
+    return { success: false, error: data.error || 'Failed to sign PSBT' };
+  }
+  
+  return { success: true, signed_psbt: data.signed_psbt };
+}
+
+// Broadcast Atomic Swap
+export async function broadcastAtomicSwap(params: {
+  orderId: string;
+  signedPsbt: string;
+}): Promise<{ success: boolean; txid?: string; error?: string }> {
+  const res = await fetch(`${API_URL}/api/atomic-swap/${params.orderId}/broadcast`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      signed_psbt: params.signedPsbt,
+    }),
+  });
+  
+  const data = await res.json();
+  
+  if (!res.ok) {
+    return { success: false, error: data.error || 'Failed to broadcast' };
+  }
+  
+  return { success: true, txid: data.txid };
+}
+
+// Cancel Atomic Swap (legacy)
+export async function cancelAtomicSwap(params: {
+  orderId: string;
+  sellerAddress: string;
+  signature: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const res = await fetch(`${API_URL}/api/atomic-swap/${params.orderId}/cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      seller_address: params.sellerAddress,
+      signature: params.signature,
+    }),
+  });
+  
+  const data = await res.json();
+  
+  if (!res.ok) {
+    return { success: false, error: data.error || 'Failed to cancel' };
+  }
+  
+  return { success: true };
+}
+
+// ========== HELPER FUNCTIONS ==========
+
+// Get My Atomic Swap Listings (seller)
+export async function getMyAtomicSwaps(address: string): Promise<AtomicSwapListing[]> {
+  return getAtomicSwapListings(address);
+}
+
+// Get Available Atomic Swap Listings (all open)
+export async function getAvailableAtomicSwaps(): Promise<AtomicSwapListing[]> {
+  return getAtomicSwapListings();
+}
+
+// Get Market Listings (alias for buy now)
+export async function getMarketListings(): Promise<BuyNowListing[]> {
+  return getBuyNowListings();
+}
+
+// Get My Market Listings (alias)
+export async function getMyMarketListings(address: string): Promise<BuyNowListing[]> {
+  const allListings = await getBuyNowListings();
+  return allListings.filter(l => l.seller_address === address);
+}
+
+export { API_URL, L2_API_URL, KRAY_OS_API };
 
