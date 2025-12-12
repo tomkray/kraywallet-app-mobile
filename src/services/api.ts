@@ -794,27 +794,157 @@ export async function getL2Nonce(address: string): Promise<number> {
   }
 }
 
-// L2 Withdraw (POST to backend)
-export async function requestL2Withdraw(params: {
-  address: string;
+// ========== L2 WITHDRAWAL FUNCTIONS (IGUAL EXTENSION) ==========
+
+// Fee UTXO type for withdrawals
+export interface FeeUtxo {
+  txid: string;
+  vout: number;
+  value: number;
+  scriptPubKey?: string;
+}
+
+// Sign L2 Message with Schnorr (via backend)
+export async function signL2Message(params: {
+  mnemonic: string;
+  messageData: {
+    from: string;
+    to: string;
+    amount: number;
+    nonce: number;
+    type: string;
+  };
+}): Promise<{ signature: string; pubkey: string }> {
+  // Create deterministic message (same format as extension)
+  const message = [
+    params.messageData.from,
+    params.messageData.to || '',
+    params.messageData.amount.toString(),
+    params.messageData.nonce.toString(),
+    params.messageData.type
+  ].join(':');
+  
+  console.log('🔐 Signing L2 message:', message.substring(0, 50) + '...');
+  
+  const res = await fetch(`${API_URL}/api/kraywallet/sign-l2-message`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mnemonic: params.mnemonic, message }),
+  });
+  
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.error || 'Failed to sign L2 message');
+  }
+  
+  const data = await res.json();
+  return { signature: data.signature, pubkey: data.pubkey };
+}
+
+// Request L2 Withdrawal with Fee UTXO (igual extension - /l2/bridge/withdrawal/user-funded)
+export async function requestL2WithdrawWithUtxo(params: {
+  account_id: string;
   amount: number;
-}): Promise<{ success: boolean; message?: string }> {
-  // Withdrawals go back to the same address (bridge requirement)
-  const res = await fetch(`${L2_API_URL}/withdraw`, {
+  l1_address: string;
+  signature: string;
+  pubkey: string;
+  nonce: number;
+  fee_rate: number;
+  fee_utxo: FeeUtxo;
+  l2_fee: number;
+}): Promise<{
+  withdrawal_id: string;
+  partial_psbt: string;
+  challenge_deadline?: string;
+}> {
+  const res = await fetch(`${L2_API_URL}/bridge/withdrawal/user-funded`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: params.address,
-      to: params.address, // Same address - bridge requirement
-      amount: params.amount.toString(),
+      account_id: params.account_id,
+      amount: params.amount,
+      l1_address: params.l1_address,
+      signature: params.signature,
+      pubkey: params.pubkey,
+      nonce: params.nonce,
+      fee_rate: params.fee_rate,
+      fee_utxo: {
+        txid: params.fee_utxo.txid,
+        vout: params.fee_utxo.vout,
+        value: params.fee_utxo.value,
+        scriptPubKey: params.fee_utxo.scriptPubKey || ''
+      },
+      l2_fee: params.l2_fee
     }),
   });
   
   if (!res.ok) {
     const error = await res.json();
-    throw new Error(error.message || 'Failed to request withdrawal');
+    throw new Error(error.error || 'Failed to create withdrawal PSBT');
   }
+  
   return res.json();
+}
+
+// Sign Withdrawal PSBT (user's fee UTXO input only)
+export async function signWithdrawalPsbt(params: {
+  mnemonic: string;
+  psbt_base64: string;
+  inputs_to_sign: number[];
+}): Promise<string> {
+  const res = await fetch(`${API_URL}/api/kraywallet/sign`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      mnemonic: params.mnemonic,
+      psbt: params.psbt_base64,
+      inputsToSign: params.inputs_to_sign,
+      sighashType: 0x01, // SIGHASH_ALL
+      autoFinalize: false,
+    }),
+  });
+  
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.error || 'Failed to sign withdrawal PSBT');
+  }
+  
+  const data = await res.json();
+  return data.signedPsbt;
+}
+
+// Submit Signed L2 Withdrawal (final step)
+export async function submitSignedL2Withdrawal(params: {
+  withdrawal_id: string;
+  signed_psbt: string;
+}): Promise<{
+  status: string;
+  challenge_deadline?: string;
+  txid?: string;
+}> {
+  const res = await fetch(`${L2_API_URL}/bridge/withdrawal/${params.withdrawal_id}/submit-signed`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      signed_psbt: params.signed_psbt
+    }),
+  });
+  
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.error || 'Failed to submit signed withdrawal');
+  }
+  
+  return res.json();
+}
+
+// DEPRECATED - use requestL2WithdrawWithUtxo instead
+export async function requestL2Withdraw(params: {
+  address: string;
+  amount: number;
+}): Promise<{ success: boolean; message?: string }> {
+  console.warn('⚠️ requestL2Withdraw is deprecated. Use requestL2WithdrawWithUtxo instead.');
+  return { success: false, message: 'Use requestL2WithdrawWithUtxo for proper withdrawal flow' };
 }
 
 // Get Pending Withdrawals
