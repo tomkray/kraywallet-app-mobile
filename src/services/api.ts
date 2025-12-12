@@ -1356,5 +1356,50 @@ export async function getMyMarketListings(address: string): Promise<BuyNowListin
   });
 }
 
+// ============================================
+// L2 WITHDRAWAL HELPERS
+// ============================================
+
+/**
+ * Calculate the sats needed for an L2 withdrawal transaction
+ * Withdrawal tx structure:
+ * - 1 input (Taproot): ~58 vBytes
+ * - 2 outputs (bridge deposit + change): ~86 vBytes
+ * - Overhead: ~10.5 vBytes
+ * Total: ~155 vBytes
+ */
+export function calculateWithdrawalFeeSats(feeRate: number): number {
+  const TX_VBYTES = 155; // Typical withdrawal tx size
+  const DUST_BUFFER = 546; // Minimum output + safety buffer
+  return Math.ceil(TX_VBYTES * feeRate) + DUST_BUFFER;
+}
+
+/**
+ * Get clean UTXOs (no inscriptions/runes) for fee payment
+ */
+export async function getCleanUtxos(address: string): Promise<any[]> {
+  try {
+    // Use backend enriched UTXOs endpoint
+    const response = await fetch(`${API_URL}/api/wallet/utxos/${address}`);
+    if (!response.ok) throw new Error('Failed to fetch UTXOs');
+    
+    const data = await response.json();
+    const utxos = data.utxos || [];
+    
+    // Filter out UTXOs with inscriptions or runes (only pure BTC)
+    const cleanUtxos = utxos.filter((utxo: any) => {
+      const hasInscription = utxo.inscription || utxo.inscriptions?.length > 0;
+      const hasRune = utxo.rune || utxo.runes?.length > 0;
+      return !hasInscription && !hasRune;
+    });
+    
+    console.log(`✅ Clean UTXOs: ${cleanUtxos.length}/${utxos.length}`);
+    return cleanUtxos;
+  } catch (error) {
+    console.error('❌ Failed to get clean UTXOs:', error);
+    return [];
+  }
+}
+
 export { API_URL, L2_API_URL, KRAY_OS_API };
 
