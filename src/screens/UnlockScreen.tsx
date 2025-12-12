@@ -1,6 +1,7 @@
 /**
  * Unlock Screen
  * Password screen when wallet is locked
+ * Style: Clean black & white
  */
 
 import React, { useState } from 'react';
@@ -18,7 +19,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useWallet } from '../context/WalletContext';
-import colors from '../theme/colors';
+import { KrayLogo } from '../components/KrayLogo';
 
 interface UnlockScreenProps {
   onUnlock: () => void;
@@ -27,7 +28,7 @@ interface UnlockScreenProps {
 
 export function UnlockScreen({ onUnlock, onRestore }: UnlockScreenProps) {
   const { unlockWallet } = useWallet();
-  
+
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -44,12 +45,16 @@ export function UnlockScreen({ onUnlock, onRestore }: UnlockScreenProps) {
 
     try {
       const success = await unlockWallet(password);
-      
+
       if (success) {
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        if (Platform.OS !== 'web') {
+          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
         onUnlock();
       } else {
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        if (Platform.OS !== 'web') {
+          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        }
         setError('Incorrect password');
         setPassword('');
       }
@@ -63,16 +68,19 @@ export function UnlockScreen({ onUnlock, onRestore }: UnlockScreenProps) {
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <KeyboardAvoidingView 
+        <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.keyboardView}
         >
           <View style={styles.content}>
             {/* Logo */}
             <View style={styles.logoContainer}>
-              <View style={styles.logoCircle}>
-                <Ionicons name="lock-closed" size={36} color={colors.white} />
-              </View>
+              <KrayLogo 
+                size={100} 
+                color="#fff" 
+                showBackground={false}
+                glow={true}
+              />
             </View>
 
             {/* Title */}
@@ -85,7 +93,7 @@ export function UnlockScreen({ onUnlock, onRestore }: UnlockScreenProps) {
                 <TextInput
                   style={styles.input}
                   placeholder="Enter password"
-                  placeholderTextColor={colors.textMuted}
+                  placeholderTextColor="#666"
                   secureTextEntry={!showPassword}
                   value={password}
                   onChangeText={(text) => {
@@ -104,7 +112,7 @@ export function UnlockScreen({ onUnlock, onRestore }: UnlockScreenProps) {
                   <Ionicons
                     name={showPassword ? 'eye-off' : 'eye'}
                     size={20}
-                    color={colors.textMuted}
+                    color="#666"
                   />
                 </TouchableOpacity>
               </View>
@@ -112,7 +120,7 @@ export function UnlockScreen({ onUnlock, onRestore }: UnlockScreenProps) {
               {/* Error Message */}
               {error ? (
                 <View style={styles.errorContainer}>
-                  <Ionicons name="alert-circle" size={16} color={colors.error} />
+                  <Ionicons name="alert-circle" size={16} color="#ef4444" />
                   <Text style={styles.errorText}>{error}</Text>
                 </View>
               ) : null}
@@ -125,10 +133,10 @@ export function UnlockScreen({ onUnlock, onRestore }: UnlockScreenProps) {
               disabled={isLoading}
             >
               {isLoading ? (
-                <ActivityIndicator color={colors.buttonPrimaryText} />
+                <ActivityIndicator color="#000" />
               ) : (
                 <>
-                  <Ionicons name="lock-open" size={20} color={colors.buttonPrimaryText} />
+                  <Ionicons name="lock-open" size={20} color="#000" />
                   <Text style={styles.unlockButtonText}>Unlock Wallet</Text>
                 </>
               )}
@@ -150,7 +158,7 @@ export function UnlockScreen({ onUnlock, onRestore }: UnlockScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#000',
   },
   safeArea: {
     flex: 1,
@@ -165,47 +173,46 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   logoContainer: {
-    marginBottom: 32,
-  },
-  logoCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.backgroundCard,
-    borderWidth: 1,
-    borderColor: colors.border,
+    marginBottom: 40,
   },
   title: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: 'bold',
-    color: colors.textPrimary,
-    marginBottom: 8,
+    color: '#fff',
+    marginBottom: 10,
+    letterSpacing: 0.5,
   },
   subtitle: {
     fontSize: 16,
-    color: colors.textSecondary,
-    marginBottom: 40,
+    color: '#888',
+    marginBottom: 50,
   },
   inputSection: {
     width: '100%',
-    marginBottom: 24,
+    marginBottom: 30,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.backgroundCard,
-    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.1)',
     paddingHorizontal: 16,
+    height: 56,
   },
   input: {
     flex: 1,
     fontSize: 16,
-    color: colors.textPrimary,
-    paddingVertical: 18,
+    color: '#fff',
+    paddingVertical: 10,
+    ...Platform.select({
+      web: {
+        // @ts-ignore
+        outline: 'none',
+        outlineStyle: 'none',
+      },
+    }),
   },
   eyeButton: {
     padding: 8,
@@ -214,43 +221,45 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 12,
-    paddingHorizontal: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderRadius: 8,
   },
   errorText: {
     fontSize: 14,
-    color: colors.error,
+    color: '#ef4444',
     marginLeft: 6,
+    fontWeight: '500',
   },
   unlockButton: {
     width: '100%',
-    borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: colors.buttonPrimary,
+    borderRadius: 12,
+    backgroundColor: '#fff',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 18,
+    paddingVertical: 16,
   },
   unlockButtonDisabled: {
     opacity: 0.5,
   },
   unlockButtonText: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: colors.buttonPrimaryText,
-    marginLeft: 10,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+    marginLeft: 8,
   },
   restoreLink: {
-    marginTop: 24,
+    marginTop: 30,
     padding: 12,
   },
   restoreLinkText: {
     fontSize: 14,
-    color: colors.textSecondary,
+    color: '#888',
   },
   restoreHighlight: {
-    color: colors.textPrimary,
+    color: '#fff',
     fontWeight: '600',
   },
 });
-

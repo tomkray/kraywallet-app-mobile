@@ -705,7 +705,7 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: 'rgba(139,92,246,0.3)',
+    borderColor: 'rgba(255,255,255,0.2)',
   },
   l2Row: {
     flexDirection: 'row',

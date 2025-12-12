@@ -59,14 +59,23 @@ interface WalletContextType {
   prepareBitcoinTx: (toAddress: string, amountSats: number, feeRate: number) => Promise<api.PSBTDetails>;
   verifyPassword: (password: string) => Promise<boolean>;
   
+  // PSBT Signing (for Buy Now / Market features)
+  signPsbt: (psbtBase64: string, password: string, sighashType?: number, inputsToSign?: number[]) => Promise<string>;
+  
   // Send Functions (Mainnet) - with password verification
   sendBitcoin: (toAddress: string, amountSats: number, feeRate: number, password: string) => Promise<string>;
   sendOrdinal: (inscriptionId: string, toAddress: string, password: string) => Promise<string>;
   sendRune: (runeId: string, toAddress: string, amount: string, password: string) => Promise<string>;
   
   // L2 Functions
-  sendL2: (toAddress: string, amount: number, token: string) => Promise<string>;
-  withdrawL2: (amount: number) => Promise<boolean>;
+  sendL2: (toAddress: string, amount: number, token: string, password: string) => Promise<string>;
+  withdrawL2: (params: {
+    amount: number;
+    password: string;
+    feeRate: number;
+    feeUtxo: api.FeeUtxo;
+    l2Fee: number;
+  }) => Promise<string>;
   swapL2: (fromToken: string, toToken: string, amount: number) => Promise<string>;
   
   // Data Loading
@@ -553,6 +562,63 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  /**
+   * Sign a PSBT with optional sighash type
+   * @param psbtBase64 - Base64 encoded PSBT
+   * @param password - Wallet password
+   * @param sighashType - Optional sighash (0x82 for seller listings, 0x01 for buyer)
+   * @returns Signed PSBT base64
+   */
+  const signPsbt = async (
+    psbtBase64: string,
+    password: string,
+    sighashType?: number,
+    inputsToSign?: number[]  // Optional: specify which inputs to sign (for atomic swaps)
+  ): Promise<string> => {
+    if (!wallet?.address) {
+      throw new Error('Wallet not connected');
+    }
+    
+    // Verify password and get mnemonic
+    const mnemonic = await getMnemonicFromPassword(password);
+    if (!mnemonic) {
+      throw new Error('Invalid password');
+    }
+    
+    console.log('🔏 Signing PSBT...', { 
+      sighashType: sighashType?.toString(16) || 'default',
+      inputsToSign: inputsToSign || 'ALL'
+    });
+    
+    try {
+      // Call backend to sign PSBT - SAME ENDPOINT AS EXTENSION!
+      const signRes = await fetch(`${api.API_URL}/api/kraywallet/sign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mnemonic,
+          psbt: psbtBase64,
+          network: 'mainnet',
+          sighashType: sighashType, // Optional - backend will use appropriate type
+          inputsToSign: inputsToSign, // Optional - specify which inputs to sign
+        }),
+      });
+      
+      if (!signRes.ok) {
+        const error = await signRes.json().catch(() => ({ error: 'Failed to sign PSBT' }));
+        throw new Error(error.error || error.message || 'Failed to sign PSBT');
+      }
+      
+      const signData = await signRes.json();
+      console.log('✅ PSBT signed');
+      
+      return signData.signedPsbt;
+    } catch (error: any) {
+      console.error('❌ PSBT signing failed:', error);
+      throw error;
+    }
+  };
+
   // Prepare Bitcoin transaction (returns PSBT details for confirmation UI)
   const prepareBitcoinTx = async (
     toAddress: string,
@@ -909,7 +975,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   // ========== L2 FUNCTIONS ==========
 
   // Send tokens on L2 (instant)
-  const sendL2 = async (toAddress: string, amount: number, token: string): Promise<string> => {
+  const sendL2 = async (toAddress: string, amount: number, token: string, password: string): Promise<string> => {
     if (!wallet?.address) {
       throw new Error('Wallet not connected');
     }
@@ -918,15 +984,59 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       throw new Error('Invalid amount');
     }
     
+    if (!password) {
+      throw new Error('Password required');
+    }
+    
     setIsLoading(true);
     try {
       console.log('⚡ L2 Transfer:', amount, token, 'to:', toAddress);
       
+      // Get mnemonic from password
+      const mnemonic = await getMnemonicFromPassword(password);
+      if (!mnemonic) {
+        throw new Error('Invalid password');
+      }
+      
+      // Get current nonce
+      const nonce = await api.getL2Nonce(wallet.address);
+      console.log('   Nonce:', nonce);
+      
+      // Create message to sign (same format as extension)
+      const message = [
+        wallet.address,
+        toAddress,
+        amount.toString(),
+        nonce.toString(),
+        'transfer'
+      ].join(':');
+      
+      console.log('   Message to sign:', message.substring(0, 50) + '...');
+      
+      // Sign the message using backend
+      const signRes = await fetch(`${api.API_URL}/api/kraywallet/sign-l2-message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mnemonic, message }),
+      });
+      
+      if (!signRes.ok) {
+        const err = await signRes.json();
+        throw new Error(err.error || 'Failed to sign message');
+      }
+      
+      const signData = await signRes.json();
+      console.log('   Signature:', signData.signature?.substring(0, 20) + '...');
+      
+      // Send transfer with signature
       const result = await api.l2Transfer({
         fromAddress: wallet.address,
         toAddress,
         amount,
         token,
+        signature: signData.signature,
+        pubkey: signData.pubkey,
+        nonce,
       });
       
       console.log('✅ L2 Transfer complete:', result.tx_hash);
@@ -940,8 +1050,16 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Withdraw from L2 to mainnet
-  const withdrawL2 = async (amount: number): Promise<boolean> => {
+  // Withdraw from L2 to mainnet - FULL PSBT FLOW (igual Extension)
+  const withdrawL2 = async (params: {
+    amount: number;
+    password: string;
+    feeRate: number;
+    feeUtxo: api.FeeUtxo;
+    l2Fee: number;
+  }): Promise<string> => {
+    const { amount, password, feeRate, feeUtxo, l2Fee } = params;
+    
     if (!wallet?.address) {
       throw new Error('Wallet not connected');
     }
@@ -957,18 +1075,76 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     try {
       console.log('📤 L2 Withdraw:', amount, 'KRAY');
+      console.log('   Fee Rate:', feeRate, 'sat/vB');
+      console.log('   Fee UTXO:', feeUtxo.txid + ':' + feeUtxo.vout, '(' + feeUtxo.value + ' sats)');
+      console.log('   L2 Fee:', l2Fee, 'KRAY');
       
-      const result = await api.requestL2Withdraw({
-        address: wallet.address,
-        amount,
+      // Step 1: Get mnemonic from password
+      const mnemonic = await getMnemonic(password);
+      if (!mnemonic) {
+        throw new Error('Invalid password');
+      }
+      
+      // Step 2: Get current nonce
+      const nonce = await api.getL2Nonce(wallet.address);
+      console.log('   Nonce:', nonce);
+      
+      // Step 3: Sign L2 withdrawal message (proves user owns L2 account)
+      console.log('   ⏳ Signing L2 message...');
+      const { signature, pubkey } = await api.signL2Message({
+        mnemonic,
+        messageData: {
+          from: wallet.address,
+          to: '', // Withdrawal has no L2 recipient
+          amount: amount,
+          nonce: nonce,
+          type: 'withdrawal',
+        },
+      });
+      console.log('   ✅ L2 Signature:', signature.substring(0, 20) + '...');
+      
+      // Step 4: Request PSBT from backend
+      console.log('   ⏳ Requesting PSBT...');
+      const withdrawResult = await api.requestL2WithdrawWithUtxo({
+        account_id: wallet.address,
+        amount: amount,
+        l1_address: wallet.address, // Always to self
+        signature,
+        pubkey,
+        nonce,
+        fee_rate: feeRate,
+        fee_utxo: feeUtxo,
+        l2_fee: l2Fee,
       });
       
-      console.log('✅ Withdrawal requested:', result);
+      if (!withdrawResult.partial_psbt || !withdrawResult.withdrawal_id) {
+        throw new Error('Failed to create withdrawal PSBT');
+      }
+      console.log('   ✅ PSBT created:', withdrawResult.withdrawal_id);
+      
+      // Step 5: Sign PSBT (user's input only)
+      console.log('   ⏳ Signing PSBT...');
+      const signedPsbt = await api.signWithdrawalPsbt({
+        mnemonic,
+        psbt_base64: withdrawResult.partial_psbt,
+        inputs_to_sign: [0], // Only sign input 0 (user's fee UTXO)
+      });
+      console.log('   ✅ PSBT signed');
+      
+      // Step 6: Submit signed PSBT
+      console.log('   ⏳ Submitting signed PSBT...');
+      const submitResult = await api.submitSignedL2Withdrawal({
+        withdrawal_id: withdrawResult.withdrawal_id,
+        signed_psbt: signedPsbt,
+      });
+      
+      console.log('✅ Withdrawal submitted!', withdrawResult.withdrawal_id);
+      console.log('   Challenge deadline:', submitResult.challenge_deadline);
       
       // Refresh L2 data
       setTimeout(() => refreshL2(), 1000);
       
-      return result.success;
+      return withdrawResult.withdrawal_id;
     } finally {
       setIsLoading(false);
     }
@@ -1032,6 +1208,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     // Transaction preparation
     prepareBitcoinTx,
     verifyPassword,
+    signPsbt,
     // Send functions (mainnet)
     sendBitcoin,
     sendOrdinal,

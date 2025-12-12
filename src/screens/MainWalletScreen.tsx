@@ -22,10 +22,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import QRCode from 'react-native-qrcode-svg';
 import { useWallet } from '../context/WalletContext';
 import { getBridgeDepositAddress } from '../services/api';
+import { WebQRScanner } from '../components/WebQRScanner';
 import colors from '../theme/colors';
 
 import { OrdinalsTab } from '../components/tabs/OrdinalsTab';
@@ -82,10 +82,7 @@ export function MainWalletScreen({ onSettings, onSend, onReceive, onAtomicSwap, 
   
   // QR Scanner state
   const [showScanner, setShowScanner] = useState(false);
-  const [scannerTarget, setScannerTarget] = useState<'l2send' | 'send'>('l2send');
-  const [scanned, setScanned] = useState(false);
-  const [permission, requestPermission] = useCameraPermissions();
-  
+
   // Rune transfer success state (elevated to prevent loss on re-render)
   const [runeSuccessTxid, setRuneSuccessTxid] = useState<string | null>(null);
 
@@ -188,21 +185,13 @@ export function MainWalletScreen({ onSettings, onSend, onReceive, onAtomicSwap, 
     return data;
   };
 
-  // Handle QR code scan
-  const handleBarCodeScanned = ({ data }: { data: string }) => {
-    if (scanned) return;
-    
-    setScanned(true);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    
-    const address = parseAddressFromQR(data);
-    
-    if (scannerTarget === 'l2send') {
-      setL2SendTo(address);
+  // Handle QR scan
+  const handleQRScan = (data: string) => {
+    if (Platform.OS !== 'web') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
-    
-    setShowScanner(false);
-    setScanned(false);
+    const address = parseAddressFromQR(data);
+    setL2SendTo(address);
   };
 
   // L2 Withdraw
@@ -242,19 +231,6 @@ export function MainWalletScreen({ onSettings, onSend, onReceive, onAtomicSwap, 
     } finally {
       setIsWithdrawing(false);
     }
-  };
-
-  // Open QR scanner
-  const openScanner = async (target: 'l2send' | 'send') => {
-    if (!permission?.granted) {
-      const result = await requestPermission();
-      if (!result.granted) {
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        return;
-      }
-    }
-    setScannerTarget(target);
-    setShowScanner(true);
   };
 
   // Handle Send button - L2 or Mainnet
@@ -494,6 +470,11 @@ export function MainWalletScreen({ onSettings, onSend, onReceive, onAtomicSwap, 
                     onTransfer={async (ordinal, toAddress, password) => {
                       return await sendOrdinal(ordinal.id, toAddress, password);
                     }}
+                    onListForSale={async (ordinal, priceSats, password) => {
+                      // List for sale flow handled internally in OrdinalsTab
+                      // This callback is optional for advanced PSBT signing
+                      return '';
+                    }}
                   />
                 )}
                 {activeTab === 'runes' && (
@@ -512,7 +493,7 @@ export function MainWalletScreen({ onSettings, onSend, onReceive, onAtomicSwap, 
                     }}
                   />
                 )}
-                {activeTab === 'activity' && <ActivityTab transactions={wallet?.transactions || []} address={wallet?.address} />}
+                {activeTab === 'activity' && <ActivityTab transactions={wallet?.transactions || []} address={wallet?.address} runes={wallet?.runes} />}
               </View>
             </>
           )}
@@ -565,7 +546,7 @@ export function MainWalletScreen({ onSettings, onSend, onReceive, onAtomicSwap, 
                   />
                   <TouchableOpacity 
                     style={styles.scanButton}
-                    onPress={() => openScanner('l2send')}
+                    onPress={() => setShowScanner(true)}
                   >
                     <Ionicons name="scan" size={22} color={colors.textPrimary} />
                   </TouchableOpacity>
@@ -867,60 +848,14 @@ export function MainWalletScreen({ onSettings, onSend, onReceive, onAtomicSwap, 
           </View>
         </Modal>
 
-        {/* QR Scanner Modal */}
-        <Modal
+        {/* QR Scanner */}
+        <WebQRScanner
           visible={showScanner}
-          animationType="slide"
-          presentationStyle="fullScreen"
-          onRequestClose={() => setShowScanner(false)}
-        >
-          <View style={styles.scannerContainer}>
-            <CameraView
-              style={styles.camera}
-              facing="back"
-              barcodeScannerSettings={{
-                barcodeTypes: ['qr'],
-              }}
-              onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-            />
-            
-            {/* Scanner Overlay */}
-            <View style={styles.scannerOverlay}>
-              {/* Top Bar */}
-              <SafeAreaView style={styles.scannerHeader}>
-                <TouchableOpacity 
-                  style={styles.scannerCloseButton}
-                  onPress={() => setShowScanner(false)}
-                >
-                  <Ionicons name="close" size={28} color="#fff" />
-                </TouchableOpacity>
-                <Text style={styles.scannerTitle}>Scan QR Code</Text>
-                <View style={styles.scannerPlaceholder} />
-              </SafeAreaView>
-              
-              {/* Scan Frame */}
-              <View style={styles.scannerFrameContainer}>
-                <View style={styles.scannerFrame}>
-                  {/* Corner decorations */}
-                  <View style={[styles.corner, styles.cornerTopLeft]} />
-                  <View style={[styles.corner, styles.cornerTopRight]} />
-                  <View style={[styles.corner, styles.cornerBottomLeft]} />
-                  <View style={[styles.corner, styles.cornerBottomRight]} />
-                </View>
-              </View>
-              
-              {/* Bottom Info */}
-              <View style={styles.scannerInfo}>
-                <Text style={styles.scannerInfoText}>
-                  Point your camera at an address QR code
-                </Text>
-                <Text style={styles.scannerInfoSubtext}>
-                  {scannerTarget === 'l2send' ? 'L2 instant transfer address' : 'Bitcoin address'}
-                </Text>
-              </View>
-            </View>
-          </View>
-        </Modal>
+          onClose={() => setShowScanner(false)}
+          onScan={handleQRScan}
+          title="Scan Address"
+          hint="Point your camera at an address QR code"
+        />
       </SafeAreaView>
     </View>
   );
@@ -1229,8 +1164,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   tokenOptionActive: {
-    backgroundColor: 'rgba(139,92,246,0.2)',
-    borderColor: '#8b5cf6',
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderColor: '#fff',
   },
   tokenOptionText: {
     fontSize: 13,
@@ -1238,7 +1173,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   tokenOptionTextActive: {
-    color: '#8b5cf6',
+    color: '#fff',
   },
   inputGroup: {
     marginBottom: 16,
@@ -1265,7 +1200,7 @@ const styles = StyleSheet.create({
   amountToken: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#8b5cf6',
+    color: '#fff',
     paddingHorizontal: 12,
   },
   balanceHint: {
@@ -1306,7 +1241,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#8b5cf6',
+    backgroundColor: '#fff',
     padding: 16,
     borderRadius: 14,
     marginBottom: 12,

@@ -21,9 +21,9 @@ import {
   Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
+import { WebQRScanner } from '../WebQRScanner';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -69,8 +69,6 @@ export function RunesTab({ runes, walletAddress, onTransfer, externalSuccessTxid
   
   // QR Scanner State
   const [showScanner, setShowScanner] = useState(false);
-  const [scanned, setScanned] = useState(false);
-  const [permission, requestPermission] = useCameraPermissions();
 
   if (runes.length === 0) {
     return (
@@ -198,24 +196,11 @@ export function RunesTab({ runes, walletAddress, onTransfer, externalSuccessTxid
     }
   };
 
-  // Open QR Scanner
-  const openScanner = async () => {
-    if (!permission?.granted) {
-      const result = await requestPermission();
-      if (!result.granted) {
-        setTransferError('Camera permission is required to scan QR codes');
-        return;
-      }
-    }
-    setShowScanner(true);
-  };
-
   // Handle QR Scan
-  const handleBarCodeScanned = ({ data }: { data: string }) => {
-    if (scanned) return;
-    
-    setScanned(true);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  const handleQRScan = (data: string) => {
+    if (Platform.OS !== 'web') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
     
     // Parse bitcoin: URI if present
     let address = data;
@@ -224,8 +209,6 @@ export function RunesTab({ runes, walletAddress, onTransfer, externalSuccessTxid
     }
     
     setTransferTo(address);
-    setShowScanner(false);
-    setScanned(false);
   };
 
   const renderRune = ({ item }: { item: Rune }) => (
@@ -292,7 +275,15 @@ export function RunesTab({ runes, walletAddress, onTransfer, externalSuccessTxid
             {/* Rune Info */}
             <View style={styles.runeInfoCard}>
               <View style={styles.runeIconLarge}>
-                <Text style={styles.runeSymbolLarge}>{selectedRune?.symbol || '◆'}</Text>
+                {selectedRune?.thumbnail ? (
+                  <Image 
+                    source={{ uri: selectedRune.thumbnail }} 
+                    style={styles.runeThumbnailLarge}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <Text style={styles.runeSymbolLarge}>{selectedRune?.symbol || '◆'}</Text>
+                )}
               </View>
               <View>
                 <Text style={styles.runeNameLarge}>{selectedRune?.name}</Text>
@@ -315,7 +306,7 @@ export function RunesTab({ runes, walletAddress, onTransfer, externalSuccessTxid
                   autoCapitalize="none"
                   autoCorrect={false}
                 />
-                <TouchableOpacity style={styles.scanButton} onPress={openScanner}>
+                <TouchableOpacity style={styles.scanButton} onPress={() => setShowScanner(true)}>
                   <Ionicons name="scan" size={22} color="#fff" />
                 </TouchableOpacity>
               </View>
@@ -436,53 +427,14 @@ export function RunesTab({ runes, walletAddress, onTransfer, externalSuccessTxid
         </View>
       </Modal>
 
-      {/* QR Scanner Modal */}
-      <Modal
+      {/* QR Scanner */}
+      <WebQRScanner
         visible={showScanner}
-        animationType="slide"
-        presentationStyle="fullScreen"
-        onRequestClose={() => setShowScanner(false)}
-      >
-        <View style={styles.scannerContainer}>
-          <CameraView
-            style={styles.camera}
-            facing="back"
-            barcodeScannerSettings={{
-              barcodeTypes: ['qr'],
-            }}
-            onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-          />
-          
-          {/* Scanner Overlay */}
-          <View style={styles.scannerOverlay}>
-            <SafeAreaView style={styles.scannerHeader}>
-              <TouchableOpacity 
-                style={styles.scannerCloseButton}
-                onPress={() => setShowScanner(false)}
-              >
-                <Ionicons name="close" size={28} color="#fff" />
-              </TouchableOpacity>
-              <Text style={styles.scannerTitle}>Scan Address</Text>
-              <View style={{ width: 44 }} />
-            </SafeAreaView>
-            
-            <View style={styles.scannerFrameContainer}>
-              <View style={styles.scannerFrame}>
-                <View style={[styles.corner, styles.cornerTopLeft]} />
-                <View style={[styles.corner, styles.cornerTopRight]} />
-                <View style={[styles.corner, styles.cornerBottomLeft]} />
-                <View style={[styles.corner, styles.cornerBottomRight]} />
-              </View>
-            </View>
-            
-            <View style={styles.scannerInfo}>
-              <Text style={styles.scannerInfoText}>
-                Scan recipient's Bitcoin address
-              </Text>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setShowScanner(false)}
+        onScan={handleQRScan}
+        title="Scan Address"
+        hint="Scan recipient's Bitcoin address"
+      />
     </View>
   );
 }
@@ -604,11 +556,15 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#111',
+    backgroundColor: '#000',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 20,
     paddingBottom: 40,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -643,6 +599,11 @@ const styles = StyleSheet.create({
   runeSymbolLarge: {
     fontSize: 28,
     color: '#fff',
+  },
+  runeThumbnailLarge: {
+    width: 56,
+    height: 56,
+    borderRadius: 14,
   },
   runeNameLarge: {
     fontSize: 18,

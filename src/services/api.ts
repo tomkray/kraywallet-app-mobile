@@ -127,9 +127,24 @@ export async function getBalance(address: string): Promise<{
 // Get UTXOs
 export async function getUTXOs(address: string): Promise<any[]> {
   try {
-    const res = await fetch(`https://mempool.space/api/address/${address}/utxo`);
-    if (!res.ok) throw new Error('Failed to fetch UTXOs');
-    return res.json();
+    // Use backend endpoint which returns enriched UTXOs with scriptPubKey, inscriptions, runes
+    console.log('📦 Fetching enriched UTXOs from backend...');
+    const res = await fetch(`${API_URL}/api/wallet/utxos/${address}`);
+    if (!res.ok) {
+      // Fallback to mempool.space
+      console.log('⚠️ Backend UTXOs failed, falling back to mempool.space');
+      const fallbackRes = await fetch(`https://mempool.space/api/address/${address}/utxo`);
+      if (!fallbackRes.ok) throw new Error('Failed to fetch UTXOs');
+      return fallbackRes.json();
+    }
+    const data = await res.json();
+    console.log('📦 UTXOs loaded:', {
+      total: data.utxos?.length || 0,
+      pure: data.utxos?.filter((u: any) => !u.hasInscription && !u.hasRunes).length || 0,
+      withInscriptions: data.utxos?.filter((u: any) => u.hasInscription).length || 0,
+      withRunes: data.utxos?.filter((u: any) => u.hasRunes).length || 0
+    });
+    return data.utxos || [];
   } catch (error) {
     console.error('Error fetching UTXOs:', error);
     return [];
@@ -925,10 +940,15 @@ export async function checkWalletOnServer(): Promise<{
 export interface BuyNowListing {
   order_id: string;
   inscription_id: string;
-  seller_address: string;
+  inscription_number?: number;
+  seller_address?: string;
+  seller_payout_address?: string;  // Backend uses this field
+  seller_txid?: string;
+  seller_vout?: number;
+  seller_value?: number;
   price_sats: number;
-  status: 'OPEN' | 'PENDING' | 'SOLD' | 'CANCELLED';
-  created_at: string;
+  status: 'OPEN' | 'PENDING' | 'SOLD' | 'CANCELLED' | 'FILLED' | 'EXPIRED';
+  created_at?: string;
   description?: string;
 }
 
@@ -961,13 +981,15 @@ export async function getAtomicSwapListings(sellerAddress?: string): Promise<Ato
 // Get Buy Now Listings (same as extension prod)
 export async function getBuyNowListings(inscriptionId?: string): Promise<BuyNowListing[]> {
   try {
+    console.log('🔍 Fetching buy now listings from:', `${API_URL}/api/atomic-swap/buy-now/listings`);
     const url = inscriptionId
-      ? `${API_URL}/api/atomic-swap/buy-now?inscription_id=${inscriptionId}`
-      : `${API_URL}/api/atomic-swap/buy-now`;
+      ? `${API_URL}/api/atomic-swap/buy-now/listings?inscription_id=${inscriptionId}`
+      : `${API_URL}/api/atomic-swap/buy-now/listings`;
     
     const res = await fetch(url);
     if (!res.ok) return [];
     const data = await res.json();
+    console.log('📦 Raw listings response:', JSON.stringify(data).slice(0, 500));
     return data.listings || [];
   } catch (error) {
     console.error('Error fetching buy now listings:', error);
@@ -1025,22 +1047,60 @@ export async function createBuyNowListing(params: {
   };
 }
 
+// Confirm Buy Now Listing (seller signs and activates the listing)
+// Uses the same /list endpoint with existing_order_id and signed_psbt
+export async function confirmBuyNowListing(params: {
+  order_id: string;
+  signed_psbt: string;
+}): Promise<{ success: boolean; order_id?: string; status?: string; error?: string }> {
+  const res = await fetch(`${API_URL}/api/atomic-swap/buy-now/list`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      order_id: params.order_id,  // Backend expects 'order_id', not 'existing_order_id'
+      signed_psbt: params.signed_psbt,
+    }),
+  });
+  
+  const data = await res.json();
+  
+  if (!res.ok) {
+    return { success: false, error: data.error || 'Failed to confirm listing' };
+  }
+  
+  return {
+    success: true,
+    order_id: data.order_id,
+    status: data.status,
+  };
+}
+
 // Buy Now - Purchase (same as extension prod)
 export async function buyNowPurchase(params: {
   orderId: string;
   buyerAddress: string;
+  buyerUtxos: Array<{ txid: string; vout: number; value: number }>;
   feeRate?: number;
 }): Promise<{ 
   success: boolean; 
   psbt_base64?: string;
   required_sats?: number;
+  inputsToSign?: number[];
   error?: string;
 }> {
+  console.log('📦 buyNowPurchase:', {
+    orderId: params.orderId,
+    buyerAddress: params.buyerAddress?.slice(0, 15) + '...',
+    utxoCount: params.buyerUtxos?.length,
+    feeRate: params.feeRate
+  });
+  
   const res = await fetch(`${API_URL}/api/atomic-swap/buy-now/${params.orderId}/buy`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       buyer_address: params.buyerAddress,
+      buyer_utxos: params.buyerUtxos,
       fee_rate: params.feeRate || 5,
     }),
   });
@@ -1055,6 +1115,7 @@ export async function buyNowPurchase(params: {
     success: true,
     psbt_base64: data.psbt_base64,
     required_sats: data.required_sats,
+    inputsToSign: data.inputsToSign || data.toSignInputs,
   };
 }
 
@@ -1287,7 +1348,12 @@ export async function getMarketListings(): Promise<BuyNowListing[]> {
 // Get My Market Listings (alias)
 export async function getMyMarketListings(address: string): Promise<BuyNowListing[]> {
   const allListings = await getBuyNowListings();
-  return allListings.filter(l => l.seller_address === address);
+  // Backend returns seller_payout_address, not seller_address
+  return allListings.filter(l => {
+    const sellerAddr = l.seller_address || l.seller_payout_address;
+    console.log(`   Checking listing ${l.order_id}: sellerAddr=${sellerAddr?.slice(0,15)}... vs wallet=${address?.slice(0,15)}...`);
+    return sellerAddr === address;
+  });
 }
 
 export { API_URL, L2_API_URL, KRAY_OS_API };

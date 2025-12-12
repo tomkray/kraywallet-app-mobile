@@ -19,10 +19,10 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { useWallet } from '../context/WalletContext';
 import { TransactionConfirmModal, TransactionDetails } from '../components/TransactionConfirmModal';
+import { WebQRScanner } from '../components/WebQRScanner';
 import * as api from '../services/api';
 import colors from '../theme/colors';
 
@@ -52,8 +52,6 @@ export function SendScreen({ onBack, onSuccess }: SendScreenProps) {
   
   // QR Scanner State
   const [showScanner, setShowScanner] = useState(false);
-  const [permission, requestPermission] = useCameraPermissions();
-  const [scanned, setScanned] = useState(false);
   
   // Confirm Modal State
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -119,33 +117,17 @@ export function SendScreen({ onBack, onSuccess }: SendScreenProps) {
     return { address: uri };
   };
 
-  // Handle barcode scan
-  const handleBarCodeScanned = ({ data }: { data: string }) => {
-    if (scanned) return;
-    
-    setScanned(true);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  // Handle QR scan
+  const handleQRScan = (data: string) => {
+    if (Platform.OS !== 'web') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
     
     const { address: scannedAddress, amount: scannedAmount } = parseBitcoinUri(data);
     setAddress(scannedAddress);
     if (scannedAmount) {
       setAmount(scannedAmount);
     }
-    
-    setShowScanner(false);
-    setScanned(false);
-  };
-
-  // Open scanner
-  const openScanner = async () => {
-    if (!permission?.granted) {
-      const result = await requestPermission();
-      if (!result.granted) {
-        setError('Camera permission is required to scan QR codes');
-        return;
-      }
-    }
-    setShowScanner(true);
   };
 
   // Prepare transaction and show confirmation
@@ -256,7 +238,7 @@ export function SendScreen({ onBack, onSuccess }: SendScreenProps) {
                 autoCapitalize="none"
                 autoCorrect={false}
               />
-              <TouchableOpacity style={styles.scanButton} onPress={openScanner}>
+              <TouchableOpacity style={styles.scanButton} onPress={() => setShowScanner(true)}>
                 <Ionicons name="scan" size={20} color={colors.textPrimary} />
               </TouchableOpacity>
             </View>
@@ -409,56 +391,14 @@ export function SendScreen({ onBack, onSuccess }: SendScreenProps) {
         walletAddress={wallet?.address}
       />
 
-      {/* QR Scanner Modal */}
-      <Modal
+      {/* QR Scanner */}
+      <WebQRScanner
         visible={showScanner}
-        animationType="slide"
-        presentationStyle="fullScreen"
-        onRequestClose={() => setShowScanner(false)}
-      >
-        <View style={styles.scannerContainer}>
-          <CameraView
-            style={styles.camera}
-            facing="back"
-            barcodeScannerSettings={{
-              barcodeTypes: ['qr'],
-            }}
-            onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-          />
-          
-          {/* Scanner Overlay */}
-          <View style={styles.scannerOverlay}>
-            <SafeAreaView style={styles.scannerHeader}>
-              <TouchableOpacity 
-                style={styles.scannerCloseButton}
-                onPress={() => setShowScanner(false)}
-              >
-                <Ionicons name="close" size={28} color="#fff" />
-              </TouchableOpacity>
-              <Text style={styles.scannerTitle}>Scan QR Code</Text>
-              <View style={styles.scannerPlaceholder} />
-            </SafeAreaView>
-            
-            <View style={styles.scannerFrameContainer}>
-              <View style={styles.scannerFrame}>
-                <View style={[styles.corner, styles.cornerTopLeft]} />
-                <View style={[styles.corner, styles.cornerTopRight]} />
-                <View style={[styles.corner, styles.cornerBottomLeft]} />
-                <View style={[styles.corner, styles.cornerBottomRight]} />
-              </View>
-            </View>
-            
-            <View style={styles.scannerInfo}>
-              <Text style={styles.scannerInfoText}>
-                Point your camera at a Bitcoin address QR code
-              </Text>
-              <Text style={styles.scannerInfoSubtext}>
-                Supports BIP21 payment URIs
-              </Text>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setShowScanner(false)}
+        onScan={handleQRScan}
+        title="Scan Address"
+        hint="Point your camera at a Bitcoin address QR code"
+      />
     </View>
   );
 }
