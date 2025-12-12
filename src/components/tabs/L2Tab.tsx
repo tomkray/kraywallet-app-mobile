@@ -819,29 +819,57 @@ export function L2Tab() {
               </View>
             ) : null}
             
-            {/* SUCCESS SCREEN */}
+            {/* SUCCESS SCREEN - Beautiful confirmation */}
             {transferSuccessTxid ? (
               <View style={styles.successScreen}>
-                <Ionicons name="checkmark-circle" size={60} color="#10b981" />
-                <Text style={styles.successTitle}>⚡ Transfer Complete!</Text>
-                <Text style={styles.successSubtitle}>L2 transfer confirmed instantly</Text>
+                {/* Success Animation */}
+                <View style={styles.successIconContainer}>
+                  <View style={styles.successIconGlow} />
+                  <Ionicons name="flash" size={50} color="#f7931a" />
+                </View>
+                
+                <Text style={styles.successTitle}>⚡ Instant Transfer!</Text>
+                <Text style={styles.successSubtitle}>Your L2 transfer was confirmed in milliseconds</Text>
+                
+                {/* Transfer Summary */}
+                <View style={styles.transferSummary}>
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>Amount</Text>
+                    <Text style={styles.summaryValue}>{transferAmount} {transferToken}</Text>
+                  </View>
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>To</Text>
+                    <Text style={styles.summaryValueSmall}>{transferTo.slice(0, 12)}...{transferTo.slice(-8)}</Text>
+                  </View>
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>Fee</Text>
+                    <Text style={styles.summaryValueGreen}>FREE ⚡</Text>
+                  </View>
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>Status</Text>
+                    <Text style={styles.summaryValueGreen}>✓ Confirmed</Text>
+                  </View>
+                </View>
                 
                 <Text style={styles.txidLabel}>TRANSACTION HASH</Text>
                 <View style={styles.txidBox}>
-                  <Text style={styles.txidText}>{transferSuccessTxid.slice(0, 20)}...{transferSuccessTxid.slice(-8)}</Text>
+                  <Text style={styles.txidText}>{transferSuccessTxid.slice(0, 16)}...{transferSuccessTxid.slice(-8)}</Text>
                   <TouchableOpacity onPress={() => copyTxid(transferSuccessTxid)} style={styles.copyTxidButton}>
                     <Ionicons name={copiedTxid ? "checkmark" : "copy"} size={18} color="#f7931a" />
                   </TouchableOpacity>
                 </View>
                 
-                <TouchableOpacity 
-                  style={styles.explorerButton}
-                  onPress={() => Linking.openURL(`https://kray.space/krayscan.html?txid=${transferSuccessTxid}`)}
-                >
-                  <Ionicons name="search-outline" size={18} color="#fff" />
-                  <Text style={styles.explorerText}>View on KrayScan L2</Text>
-                  <Ionicons name="open-outline" size={16} color="#fff" />
-                </TouchableOpacity>
+                {/* Explorer Links */}
+                <View style={styles.explorerLinks}>
+                  <TouchableOpacity 
+                    style={styles.explorerButton}
+                    onPress={() => Linking.openURL(`https://kray.space/krayscan.html?l2tx=${transferSuccessTxid}`)}
+                  >
+                    <Ionicons name="flash-outline" size={18} color="#fff" />
+                    <Text style={styles.explorerText}>View on KrayScan</Text>
+                    <Ionicons name="open-outline" size={14} color="#888" />
+                  </TouchableOpacity>
+                </View>
               </View>
             ) : null}
             
@@ -2063,9 +2091,22 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
     marginBottom: 16,
   },
+  successIconContainer: {
+    position: 'relative',
+    marginBottom: 8,
+  },
+  successIconGlow: {
+    position: 'absolute',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(247,147,26,0.2)',
+    top: -15,
+    left: -15,
+  },
   successTitle: {
-    color: '#10b981',
-    fontSize: 22,
+    color: '#f7931a',
+    fontSize: 24,
     fontWeight: 'bold',
     marginTop: 12,
   },
@@ -2073,7 +2114,44 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     fontSize: 14,
     marginTop: 4,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  transferSummary: {
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    padding: 16,
     marginBottom: 20,
+    gap: 12,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  summaryLabel: {
+    color: '#64748b',
+    fontSize: 14,
+  },
+  summaryValue: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  summaryValueSmall: {
+    color: '#fff',
+    fontSize: 13,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  summaryValueGreen: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  explorerLinks: {
+    width: '100%',
+    gap: 8,
   },
   txidLabel: {
     color: '#64748b',
