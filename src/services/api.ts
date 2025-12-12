@@ -756,23 +756,42 @@ export async function l2Transfer(params: {
   toAddress: string;
   amount: number;
   token: string;
+  signature: string;
+  pubkey: string;
+  nonce: number;
 }): Promise<{ tx_hash: string; success: boolean }> {
-  const res = await fetch(`${L2_API_URL}/transfer`, {
+  // Correct endpoint: /l2/transaction/send
+  const res = await fetch(`${L2_API_URL}/transaction/send`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: params.fromAddress,
-      to: params.toAddress,
+      from_account: params.fromAddress,
+      to_account: params.toAddress,
       amount: params.amount.toString(),
-      token: params.token,
+      signature: params.signature,
+      pubkey: params.pubkey,
+      nonce: params.nonce,
+      tx_type: 'transfer'
     }),
   });
   
   if (!res.ok) {
     const error = await res.json();
-    throw new Error(error.message || 'Failed to transfer');
+    throw new Error(error.error || error.message || 'Failed to transfer');
   }
   return res.json();
+}
+
+// Get L2 account nonce (for signing transactions)
+export async function getL2Nonce(address: string): Promise<number> {
+  try {
+    const res = await fetch(`${L2_API_URL}/account/${address}/balance`);
+    if (!res.ok) return 0;
+    const data = await res.json();
+    return data.nonce || 0;
+  } catch (error) {
+    return 0;
+  }
 }
 
 // L2 Withdraw (POST to backend)
@@ -798,15 +817,20 @@ export async function requestL2Withdraw(params: {
   return res.json();
 }
 
-// Get Pending Withdrawals - endpoint may not exist yet
+// Get Pending Withdrawals
 export async function getPendingWithdrawals(address: string): Promise<any[]> {
   try {
-    // Try the withdrawals endpoint (may return 404)
-    const res = await fetch(`${L2_API_URL}/account/${address}/withdrawals`);
-    if (!res.ok) return [];
+    // Correct endpoint: /l2/bridge/withdrawals/:address/pending
+    const res = await fetch(`${L2_API_URL}/bridge/withdrawals/${address}/pending`);
+    if (!res.ok) {
+      console.log(`⚠️ Pending withdrawals: ${res.status}`);
+      return [];
+    }
     const data = await res.json();
+    console.log(`✅ Pending withdrawals: ${data.withdrawals?.length || 0}`);
     return data.withdrawals || [];
   } catch (error) {
+    console.log('⚠️ Pending withdrawals fetch failed:', error);
     return [];
   }
 }
