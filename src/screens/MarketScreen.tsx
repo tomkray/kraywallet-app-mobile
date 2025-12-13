@@ -1129,9 +1129,9 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
                 {assetFilter === 'all' && (
                   <Text style={[styles.runesSectionTitle, { color: '#10b981' }]}>◉ Ordinals ({getFilteredListings(activeTab === 'browse' ? listings : myListings).length})</Text>
                 )}
-                <View style={[styles.row, { flexWrap: 'wrap', paddingHorizontal: 8 }]}>
+                <View style={[styles.row, { paddingHorizontal: 12, justifyContent: 'flex-start' }]}>
                   {getFilteredListings(activeTab === 'browse' ? listings : myListings).map(item => (
-                    <View key={item.order_id} style={{ width: '33.33%', padding: 4 }}>
+                    <View key={item.order_id}>
                       {renderListing({ item })}
                     </View>
                   ))}
@@ -1143,9 +1143,9 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
             {assetFilter === 'all' && getFilteredRunesListings(activeTab === 'my-listings').length > 0 && (
               <>
                 <Text style={styles.runesSectionTitle}>⧈ Runes ({getFilteredRunesListings(activeTab === 'my-listings').length})</Text>
-                <View style={[styles.row, { flexWrap: 'wrap', paddingHorizontal: 8 }]}>
+                <View style={[styles.row, { paddingHorizontal: 12, justifyContent: 'flex-start' }]}>
                   {getFilteredRunesListings(activeTab === 'my-listings').map(item => (
-                    <View key={item.order_id} style={{ width: '33.33%', padding: 4 }}>
+                    <View key={item.order_id}>
                       {renderRunesListing({ item })}
                     </View>
                   ))}
@@ -2197,15 +2197,16 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   row: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     marginBottom: 8,
   },
   listingCard: {
-    flex: 1,
-    maxWidth: '31%',
+    width: 110,
     backgroundColor: colors.backgroundCard,
-    borderRadius: 10,
-    padding: 8,
+    borderRadius: 12,
+    padding: 10,
     borderWidth: 1,
     borderColor: colors.border,
   },
@@ -2227,19 +2228,20 @@ const styles = StyleSheet.create({
     fontSize: 20,
   },
   listingInfo: {
-    marginTop: 6,
-    marginBottom: 6,
+    marginTop: 8,
+    marginBottom: 8,
   },
   listingNumber: {
-    fontSize: 11,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
     color: colors.textPrimary,
+    marginBottom: 2,
   },
   listingPriceText: {
-    fontSize: 10,
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '800',
     color: '#10b981',
-    marginTop: 2,
+    marginTop: 4,
   },
   listingAsset: {
     fontSize: 14,
@@ -2314,12 +2316,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.buttonPrimary,
-    padding: 6,
-    borderRadius: 6,
-    marginTop: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginTop: 6,
   },
   buyButtonText: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '700',
     color: colors.buttonPrimaryText,
   },
@@ -2357,13 +2360,14 @@ const styles = StyleSheet.create({
   listingThumbnail: {
     width: '100%',
     aspectRatio: 1,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     overflow: 'hidden',
   },
   thumbnailImage: {
     width: '100%',
     height: '100%',
+    borderRadius: 10,
   },
   emptyState: {
     alignItems: 'center',
@@ -3134,20 +3138,20 @@ const styles = StyleSheet.create({
   // 🪙 Runes Market Styles
   runeBadge: {
     position: 'absolute',
-    top: 4,
-    right: 4,
+    top: 6,
+    right: 6,
     backgroundColor: '#ff6b35',
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
   },
   runeBadgeText: {
-    fontSize: 8,
-    fontWeight: '700',
+    fontSize: 9,
+    fontWeight: '800',
     color: '#000',
   },
   runeAmountText: {
-    fontSize: 9,
+    fontSize: 11,
     color: colors.textMuted,
     marginTop: 2,
   },
@@ -3160,12 +3164,12 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   runesSectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
     color: '#ff6b35',
-    marginLeft: 16,
-    marginBottom: 8,
-    marginTop: 16,
+    marginLeft: 12,
+    marginBottom: 12,
+    marginTop: 20,
   },
 });
 
