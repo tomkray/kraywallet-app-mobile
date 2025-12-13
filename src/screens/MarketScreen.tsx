@@ -879,12 +879,12 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
       
       console.log('📋 PSBT received, inputs to sign:', prepareRes.inputs_to_sign);
       
-      // Step 2: Sign PSBT (buyer signs their inputs with SIGHASH_ALL)
+      // Step 2: Sign PSBT (buyer signs their inputs with SIGHASH_ALL = 0x01)
       console.log('🔏 Signing purchase PSBT...');
       const signedPsbt = await signPsbt(
         prepareRes.psbt_base64, 
         buyRunesPassword, 
-        '1' // SIGHASH_ALL for buyer
+        0x01 // SIGHASH_ALL for buyer (same as ordinals)
       );
       
       if (!signedPsbt) {
