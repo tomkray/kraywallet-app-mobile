@@ -1555,5 +1555,253 @@ export async function getCleanUtxos(address: string): Promise<any[]> {
   }
 }
 
+// ========== RUNES ATOMIC SWAP / RUNES MARKET API ==========
+// Endpoints: /api/runes-atomic-swap/...
+// Uses SIGHASH_SINGLE|ANYONECANPAY (0x83) for partial rune sales
+
+export interface RunesListing {
+  order_id: string;
+  rune_id: string;
+  rune_name: string;
+  rune_symbol: string;
+  sell_amount: string;      // Raw amount
+  total_amount: string;     // Raw amount in UTXO
+  divisibility: number;
+  price_sats: number;
+  price_per_token: number;
+  seller_txid: string;
+  seller_vout: number;
+  seller_payout_address: string;
+  status: 'PENDING' | 'OPEN' | 'FILLED' | 'CANCELLED';
+  created_at: string;
+  thumbnail?: string;
+}
+
+export interface RunesMarketStats {
+  active_listings: number;
+  total_sales: number;
+  total_volume: number;
+  unique_runes: number;
+}
+
+// Get Runes Market Stats
+export async function getRunesMarketStats(): Promise<RunesMarketStats> {
+  try {
+    const res = await fetch(`${API_URL}/api/runes-atomic-swap/stats`);
+    if (!res.ok) throw new Error('Failed to fetch stats');
+    const data = await res.json();
+    return data.stats || { active_listings: 0, total_sales: 0, total_volume: 0, unique_runes: 0 };
+  } catch (error) {
+    console.error('Error fetching runes market stats:', error);
+    return { active_listings: 0, total_sales: 0, total_volume: 0, unique_runes: 0 };
+  }
+}
+
+// Get All Runes Listings
+export async function getRunesListings(params?: {
+  rune_id?: string;
+  seller_address?: string;
+  sort?: 'price_asc' | 'price_desc' | 'amount_desc' | 'recent';
+  limit?: number;
+}): Promise<RunesListing[]> {
+  try {
+    let url = `${API_URL}/api/runes-atomic-swap/?limit=${params?.limit || 50}`;
+    if (params?.rune_id) url += `&rune_id=${params.rune_id}`;
+    if (params?.seller_address) url += `&seller_address=${params.seller_address}`;
+    if (params?.sort) url += `&sort=${params.sort}`;
+    
+    console.log('🔍 Fetching runes listings from:', url);
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.listings || [];
+  } catch (error) {
+    console.error('Error fetching runes listings:', error);
+    return [];
+  }
+}
+
+// Get Single Runes Listing
+export async function getRunesListing(orderId: string): Promise<RunesListing | null> {
+  try {
+    const res = await fetch(`${API_URL}/api/runes-atomic-swap/${orderId}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.listing || null;
+  } catch (error) {
+    console.error('Error fetching runes listing:', error);
+    return null;
+  }
+}
+
+// Check if UTXO is already listed
+export async function checkRunesUtxoListed(txid: string, vout: number): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_URL}/api/runes-atomic-swap/check/${txid}/${vout}`);
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data.is_listed || false;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Create Runes Listing (Step 1: Get PSBT to sign)
+export async function createRunesListing(params: {
+  rune_id: string;
+  rune_name: string;
+  rune_symbol?: string;
+  sell_amount: string;        // Raw amount
+  total_amount?: string;      // Raw amount in UTXO
+  divisibility: number;
+  seller_txid: string;
+  seller_vout: number;
+  seller_value: number;
+  seller_script_pubkey?: string;
+  price_sats: number;
+  seller_payout_address: string;
+}): Promise<{
+  success: boolean;
+  order_id?: string;
+  psbt_base64?: string;
+  error?: string;
+}> {
+  try {
+    const res = await fetch(`${API_URL}/api/runes-atomic-swap/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    
+    const data = await res.json();
+    if (!res.ok) return { success: false, error: data.error };
+    
+    return {
+      success: true,
+      order_id: data.order_id,
+      psbt_base64: data.psbt_base64,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+// Submit Signed Runes Listing PSBT (Step 2: SIGHASH 0x83)
+export async function signRunesListing(params: {
+  order_id: string;
+  signed_psbt_base64: string;
+}): Promise<{ success: boolean; status?: string; error?: string }> {
+  try {
+    const res = await fetch(`${API_URL}/api/runes-atomic-swap/${params.order_id}/sign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signed_psbt_base64: params.signed_psbt_base64 }),
+    });
+    
+    const data = await res.json();
+    if (!res.ok) return { success: false, error: data.error };
+    
+    return { success: true, status: data.status };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+// Buy Runes - Prepare Purchase PSBT (Step 3)
+export async function buyRunesPrepare(params: {
+  orderId: string;
+  buyerAddress: string;
+  buyerUtxos: Array<{ txid: string; vout: number; value: number; scriptPubKey?: string }>;
+  feeRate?: number;
+}): Promise<{
+  success: boolean;
+  psbt_base64?: string;
+  inputs_to_sign?: number[];
+  breakdown?: any;
+  error?: string;
+}> {
+  try {
+    console.log('📦 buyRunesPrepare:', {
+      orderId: params.orderId,
+      buyerAddress: params.buyerAddress?.slice(0, 15) + '...',
+      utxoCount: params.buyerUtxos?.length,
+      feeRate: params.feeRate
+    });
+    
+    const res = await fetch(`${API_URL}/api/runes-atomic-swap/${params.orderId}/buy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        buyer_address: params.buyerAddress,
+        buyer_utxos: params.buyerUtxos,
+        fee_rate: params.feeRate || 10,
+      }),
+    });
+    
+    const data = await res.json();
+    if (!res.ok) return { success: false, error: data.error };
+    
+    return {
+      success: true,
+      psbt_base64: data.psbt_base64,
+      inputs_to_sign: data.inputs_to_sign,
+      breakdown: data.breakdown,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+// Broadcast Runes Purchase (Step 4)
+export async function buyRunesBroadcast(params: {
+  orderId: string;
+  signedPsbt: string;
+  buyerAddress: string;
+}): Promise<{ success: boolean; txid?: string; error?: string }> {
+  try {
+    const res = await fetch(`${API_URL}/api/runes-atomic-swap/${params.orderId}/broadcast`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        signed_psbt_base64: params.signedPsbt,
+        buyer_address: params.buyerAddress,
+      }),
+    });
+    
+    const data = await res.json();
+    if (!res.ok) return { success: false, error: data.error };
+    
+    return { success: true, txid: data.txid };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+// Cancel Runes Listing
+export async function cancelRunesListing(params: {
+  orderId: string;
+  sellerAddress: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${API_URL}/api/runes-atomic-swap/${params.orderId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seller_address: params.sellerAddress }),
+    });
+    
+    const data = await res.json();
+    if (!res.ok) return { success: false, error: data.error };
+    
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+// Get My Runes Listings
+export async function getMyRunesListings(address: string): Promise<RunesListing[]> {
+  return getRunesListings({ seller_address: address });
+}
+
 export { API_URL, L2_API_URL, KRAY_OS_API };
 

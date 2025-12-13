@@ -33,7 +33,7 @@ interface MarketScreenProps {
   onBack: () => void;
 }
 
-type TabType = 'browse' | 'collections' | 'my-listings';
+type TabType = 'browse' | 'collections' | 'my-listings' | 'runes-market';
 type AssetFilter = 'all' | 'ordinal' | 'rune';
 
 // Known Collections - Same as ordinals.html
@@ -94,6 +94,10 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [listings, setListings] = useState<api.BuyNowListing[]>([]);
   const [myListings, setMyListings] = useState<api.BuyNowListing[]>([]);
+  
+  // Runes Market listings (from /api/runes-atomic-swap)
+  const [runesListings, setRunesListings] = useState<api.RunesListing[]>([]);
+  const [myRunesListings, setMyRunesListings] = useState<api.RunesListing[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
   // Collections state
@@ -146,6 +150,15 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelError, setCancelError] = useState('');
   const [editMessage, setEditMessage] = useState('');
+  
+  // 🪙 Runes Market - Buy Modal
+  const [showBuyRunesModal, setShowBuyRunesModal] = useState(false);
+  const [selectedRunesListing, setSelectedRunesListing] = useState<api.RunesListing | null>(null);
+  const [isBuyingRunes, setIsBuyingRunes] = useState(false);
+  const [buyRunesPassword, setBuyRunesPassword] = useState('');
+  const [buyRunesStep, setBuyRunesStep] = useState<'confirm' | 'password' | 'signing'>('confirm');
+  const [buyRunesError, setBuyRunesError] = useState('');
+  const [buyRunesFeeRate, setBuyRunesFeeRate] = useState<number>(5);
 
   useEffect(() => {
     loadListings();
@@ -185,26 +198,45 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
       console.log('🏪 Loading market listings...');
       console.log('   Wallet address:', wallet?.address);
       
+      // Load Ordinals/Inscriptions listings
       const allListings = await api.getBuyNowListings();
-      console.log('   All listings:', allListings.length);
+      console.log('   Ordinals listings:', allListings.length);
       
       // Filter by status = OPEN
       const openListings = allListings.filter(l => l.status === 'OPEN');
-      console.log('   Open listings:', openListings.length);
+      console.log('   Open ordinals listings:', openListings.length);
       
       // Filter my listings - backend uses seller_payout_address
       const mine = wallet?.address 
         ? openListings.filter(l => {
             const sellerAddr = l.seller_address || l.seller_payout_address;
             const match = sellerAddr === wallet.address;
-            console.log(`   Checking ${l.order_id}: seller=${sellerAddr?.slice(0,10)}... wallet=${wallet.address?.slice(0,10)}... match=${match}`);
             return match;
           })
         : [];
-      console.log('   My listings:', mine.length);
+      console.log('   My ordinals listings:', mine.length);
       
       setListings(openListings);
       setMyListings(mine);
+      
+      // 🪙 Load Runes Market listings
+      console.log('🪙 Loading Runes Market listings...');
+      const allRunesListings = await api.getRunesListings();
+      console.log('   Runes listings:', allRunesListings.length);
+      
+      // Filter by status = OPEN
+      const openRunesListings = allRunesListings.filter(l => l.status === 'OPEN');
+      console.log('   Open runes listings:', openRunesListings.length);
+      
+      // Filter my runes listings
+      const myRunes = wallet?.address 
+        ? openRunesListings.filter(l => l.seller_payout_address === wallet.address)
+        : [];
+      console.log('   My runes listings:', myRunes.length);
+      
+      setRunesListings(openRunesListings);
+      setMyRunesListings(myRunes);
+      
     } catch (error) {
       console.error('Error loading listings:', error);
     } finally {
@@ -641,18 +673,23 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
 
   // Filter listings by asset type
   const getFilteredListings = (listingsToFilter: api.BuyNowListing[]) => {
+    // When filter is 'rune', we don't return ordinals listings
+    // Runes are handled separately in getFilteredRunesListings
+    if (assetFilter === 'rune') return [];
     if (assetFilter === 'all') return listingsToFilter;
     
     return listingsToFilter.filter(listing => {
       // Inscriptions/Ordinals have inscription_id
       const isOrdinal = !!listing.inscription_id;
-      // Runes would have rune_id or similar (not implemented yet)
-      const isRune = false; // TODO: Add rune detection when runes marketplace is implemented
-      
       if (assetFilter === 'ordinal') return isOrdinal;
-      if (assetFilter === 'rune') return isRune;
       return true;
     });
+  };
+  
+  // Get runes listings (when filter is 'rune' or 'all')
+  const getFilteredRunesListings = (isMyListings: boolean = false) => {
+    if (assetFilter === 'ordinal') return [];
+    return isMyListings ? myRunesListings : runesListings;
   };
 
   const renderListing = ({ item }: { item: api.BuyNowListing }) => {
@@ -721,6 +758,204 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
           </TouchableOpacity>
         )}
       </TouchableOpacity>
+    );
+  };
+
+  // 🪙 Render Runes Listing Card
+  const renderRunesListing = ({ item }: { item: api.RunesListing }) => {
+    const isMyListing = item.seller_payout_address === wallet?.address;
+    const displayAmount = Number(item.sell_amount) / Math.pow(10, item.divisibility || 0);
+    const pricePerToken = (item.price_sats / displayAmount).toFixed(2);
+    
+    return (
+      <TouchableOpacity 
+        style={styles.listingCard}
+        onPress={() => openBuyRunesModal(item)}
+        activeOpacity={0.8}
+      >
+        {/* Rune Symbol/Icon */}
+        <View style={[styles.listingThumbnail, { backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' }]}>
+          <Text style={{ fontSize: 32 }}>{item.rune_symbol || '⧈'}</Text>
+          <View style={styles.runeBadge}>
+            <Text style={styles.runeBadgeText}>RUNE</Text>
+          </View>
+        </View>
+        
+        {/* Name & Price */}
+        <View style={styles.listingInfo}>
+          <Text style={styles.listingNumber} numberOfLines={1}>
+            {item.rune_name || item.rune_id}
+          </Text>
+          <Text style={styles.runeAmountText}>{displayAmount.toLocaleString()} tokens</Text>
+          <Text style={styles.listingPriceText}>{formatSats(item.price_sats)}</Text>
+          <Text style={styles.runePricePerToken}>{pricePerToken} sat/token</Text>
+        </View>
+        
+        {/* Action Buttons */}
+        {isMyListing ? (
+          <View style={styles.myListingActions}>
+            <TouchableOpacity 
+              style={styles.cancelListingButton}
+              onPress={(e) => {
+                e.stopPropagation();
+                handleCancelRunesListing(item);
+              }}
+            >
+              <Ionicons name="trash" size={12} color={colors.error} />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity 
+            style={[styles.buyButton, { backgroundColor: '#ff6b35' }]}
+            onPress={(e) => {
+              e.stopPropagation();
+              openBuyRunesModal(item);
+            }}
+          >
+            <Text style={styles.buyButtonText}>Buy</Text>
+          </TouchableOpacity>
+        )}
+      </TouchableOpacity>
+    );
+  };
+  
+  // Open Runes Buy Modal
+  const openBuyRunesModal = (listing: api.RunesListing) => {
+    setSelectedRunesListing(listing);
+    setShowBuyRunesModal(true);
+    setBuyRunesStep('confirm');
+    setBuyRunesError('');
+    setBuyRunesPassword('');
+    if (mempoolFees) {
+      setBuyRunesFeeRate(mempoolFees.medium);
+    }
+  };
+  
+  // Handle Runes Purchase
+  const handleBuyRunes = async () => {
+    if (!wallet?.address || !selectedRunesListing || !buyRunesPassword) return;
+    
+    if (!wallet.utxos || wallet.utxos.length === 0) {
+      setBuyRunesError('No UTXOs available. Please fund your wallet first.');
+      return;
+    }
+    
+    setIsBuyingRunes(true);
+    setBuyRunesStep('signing');
+    setBuyRunesError('');
+    
+    try {
+      // 🛡️ FILTER PURE UTXOs
+      const pureUtxos = wallet.utxos.filter((utxo: any) => 
+        !utxo.hasInscription && !utxo.hasRunes
+      );
+      
+      console.log('🪙 RUNES PURCHASE:');
+      console.log('   Pure UTXOs:', pureUtxos.length);
+      
+      if (pureUtxos.length === 0) {
+        throw new Error('No pure BTC UTXOs available. All your UTXOs contain Inscriptions or Runes.');
+      }
+      
+      const buyerUtxos = pureUtxos.map((utxo: any) => ({
+        txid: utxo.txid,
+        vout: utxo.vout,
+        value: utxo.value,
+        scriptPubKey: utxo.scriptPubKey || utxo.script_pubkey || utxo.script,
+      }));
+      
+      // Step 1: Prepare purchase PSBT
+      console.log('📦 Preparing Runes purchase PSBT...');
+      const prepareRes = await api.buyRunesPrepare({
+        orderId: selectedRunesListing.order_id,
+        buyerAddress: wallet.address,
+        buyerUtxos: buyerUtxos,
+        feeRate: buyRunesFeeRate,
+      });
+      
+      if (!prepareRes.success || !prepareRes.psbt_base64) {
+        throw new Error(prepareRes.error || 'Failed to prepare purchase PSBT');
+      }
+      
+      console.log('📋 PSBT received, inputs to sign:', prepareRes.inputs_to_sign);
+      
+      // Step 2: Sign PSBT (buyer signs their inputs with SIGHASH_ALL)
+      console.log('🔏 Signing purchase PSBT...');
+      const signedPsbt = await signPsbt(
+        prepareRes.psbt_base64, 
+        buyRunesPassword, 
+        '1' // SIGHASH_ALL for buyer
+      );
+      
+      if (!signedPsbt) {
+        throw new Error('Failed to sign PSBT');
+      }
+      
+      console.log('✅ PSBT signed, broadcasting...');
+      
+      // Step 3: Broadcast
+      const broadcastRes = await api.buyRunesBroadcast({
+        orderId: selectedRunesListing.order_id,
+        signedPsbt: signedPsbt,
+        buyerAddress: wallet.address,
+      });
+      
+      if (!broadcastRes.success) {
+        throw new Error(broadcastRes.error || 'Failed to broadcast');
+      }
+      
+      console.log('✅ Runes purchase complete:', broadcastRes.txid);
+      
+      // Success!
+      setShowBuyRunesModal(false);
+      setSuccessTxid(broadcastRes.txid || '');
+      setShowSuccessModal(true);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      
+      // Refresh listings
+      await loadListings();
+      
+    } catch (error: any) {
+      console.error('❌ Runes purchase failed:', error);
+      setBuyRunesError(error.message || 'Purchase failed');
+      setBuyRunesStep('confirm');
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setIsBuyingRunes(false);
+    }
+  };
+  
+  // Cancel Runes Listing
+  const handleCancelRunesListing = async (listing: api.RunesListing) => {
+    if (!wallet?.address) return;
+    
+    Alert.alert(
+      'Cancel Listing',
+      `Cancel ${listing.rune_name} listing for ${formatSats(listing.price_sats)}?`,
+      [
+        { text: 'No', style: 'cancel' },
+        {
+          text: 'Yes, Cancel',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const result = await api.cancelRunesListing({
+                orderId: listing.order_id,
+                sellerAddress: wallet.address!,
+              });
+              
+              if (result.success) {
+                Alert.alert('Success', 'Listing cancelled successfully');
+                await loadListings();
+              } else {
+                Alert.alert('Error', result.error || 'Failed to cancel listing');
+              }
+            } catch (error: any) {
+              Alert.alert('Error', error.message);
+            }
+          },
+        },
+      ]
     );
   };
 
@@ -846,10 +1081,11 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
             </View>
             <View style={{ height: 40 }} />
           </ScrollView>
-        ) : (
+        ) : assetFilter === 'rune' ? (
+          /* 🪙 RUNES MARKET - Only Runes */
           <FlatList
-            data={getFilteredListings(activeTab === 'browse' ? listings : myListings)}
-            renderItem={renderListing}
+            data={getFilteredRunesListings(activeTab === 'my-listings')}
+            renderItem={renderRunesListing}
             keyExtractor={(item) => item.order_id}
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
@@ -864,6 +1100,63 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
             }
             ListEmptyComponent={
               <View style={styles.emptyState}>
+                <Text style={styles.emptyIcon}>🪙</Text>
+                <Text style={styles.emptyTitle}>No Runes Listings</Text>
+                <Text style={styles.emptyText}>
+                  {activeTab === 'browse' 
+                    ? 'No runes for sale right now'
+                    : 'You have no rune listings'}
+                </Text>
+              </View>
+            }
+          />
+        ) : (
+          /* Ordinals + All (when filter is 'all' or 'ordinal') */
+          <ScrollView
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor={colors.textPrimary}
+              />
+            }
+          >
+            {/* Ordinals Listings */}
+            {getFilteredListings(activeTab === 'browse' ? listings : myListings).length > 0 && (
+              <>
+                {assetFilter === 'all' && (
+                  <Text style={[styles.runesSectionTitle, { color: '#10b981' }]}>◉ Ordinals ({getFilteredListings(activeTab === 'browse' ? listings : myListings).length})</Text>
+                )}
+                <View style={[styles.row, { flexWrap: 'wrap', paddingHorizontal: 8 }]}>
+                  {getFilteredListings(activeTab === 'browse' ? listings : myListings).map(item => (
+                    <View key={item.order_id} style={{ width: '33.33%', padding: 4 }}>
+                      {renderListing({ item })}
+                    </View>
+                  ))}
+                </View>
+              </>
+            )}
+            
+            {/* 🪙 Runes Listings (only when filter is 'all') */}
+            {assetFilter === 'all' && getFilteredRunesListings(activeTab === 'my-listings').length > 0 && (
+              <>
+                <Text style={styles.runesSectionTitle}>⧈ Runes ({getFilteredRunesListings(activeTab === 'my-listings').length})</Text>
+                <View style={[styles.row, { flexWrap: 'wrap', paddingHorizontal: 8 }]}>
+                  {getFilteredRunesListings(activeTab === 'my-listings').map(item => (
+                    <View key={item.order_id} style={{ width: '33.33%', padding: 4 }}>
+                      {renderRunesListing({ item })}
+                    </View>
+                  ))}
+                </View>
+              </>
+            )}
+            
+            {/* Empty State */}
+            {getFilteredListings(activeTab === 'browse' ? listings : myListings).length === 0 && 
+             (assetFilter !== 'all' || getFilteredRunesListings(activeTab === 'my-listings').length === 0) && (
+              <View style={styles.emptyState}>
                 <Text style={styles.emptyIcon}>🏪</Text>
                 <Text style={styles.emptyTitle}>No Listings</Text>
                 <Text style={styles.emptyText}>
@@ -872,8 +1165,10 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
                     : 'You have no active listings'}
                 </Text>
               </View>
-            }
-          />
+            )}
+            
+            <View style={{ height: 40 }} />
+          </ScrollView>
         )}
 
         {/* Create Listing Modal */}
@@ -1182,6 +1477,154 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
                       <>
                         <Ionicons name="card" size={20} color={colors.buttonPrimaryText} />
                         <Text style={styles.primaryButtonText}>Confirm Purchase</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </View>
+        </Modal>
+
+        {/* 🪙 Buy Runes Modal */}
+        <Modal
+          visible={showBuyRunesModal}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShowBuyRunesModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>
+                  {buyRunesStep === 'signing' ? '🔏 Signing...' : '🪙 Buy Runes'}
+                </Text>
+                <TouchableOpacity onPress={() => setShowBuyRunesModal(false)}>
+                  <Ionicons name="close" size={24} color={colors.textPrimary} />
+                </TouchableOpacity>
+              </View>
+              
+              {buyRunesStep === 'signing' ? (
+                <View style={styles.signingContainer}>
+                  <ActivityIndicator size="large" color="#ff6b35" />
+                  <Text style={styles.signingText}>Processing purchase...</Text>
+                  <Text style={styles.signingSubtext}>Please wait</Text>
+                </View>
+              ) : selectedRunesListing && (
+                <>
+                  <View style={styles.buyDetails}>
+                    {/* Rune Info */}
+                    <View style={[styles.buyItem, { alignItems: 'center' }]}>
+                      <View style={[styles.buyItemThumbnail, { backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' }]}>
+                        <Text style={{ fontSize: 32 }}>{selectedRunesListing.rune_symbol || '⧈'}</Text>
+                      </View>
+                      <View style={styles.buyItemInfo}>
+                        <Text style={styles.buyItemName} numberOfLines={1}>
+                          {selectedRunesListing.rune_name || selectedRunesListing.rune_id}
+                        </Text>
+                        <Text style={styles.buyItemType}>RUNE</Text>
+                        <Text style={[styles.buyItemType, { color: '#ff6b35' }]}>
+                          {(Number(selectedRunesListing.sell_amount) / Math.pow(10, selectedRunesListing.divisibility || 0)).toLocaleString()} tokens
+                        </Text>
+                      </View>
+                    </View>
+                    
+                    {/* Price Breakdown */}
+                    <View style={styles.buyPriceBox}>
+                      <View style={styles.priceRow}>
+                        <Text style={styles.priceRowLabel}>Price</Text>
+                        <Text style={styles.priceRowValue}>{formatSats(selectedRunesListing.price_sats)}</Text>
+                      </View>
+                      <View style={styles.priceRow}>
+                        <Text style={styles.priceRowLabel}>Price per token</Text>
+                        <Text style={[styles.priceRowValue, { color: '#ff6b35' }]}>
+                          {(selectedRunesListing.price_sats / (Number(selectedRunesListing.sell_amount) / Math.pow(10, selectedRunesListing.divisibility || 0))).toFixed(4)} sat
+                        </Text>
+                      </View>
+                      <View style={styles.priceRow}>
+                        <Text style={styles.priceRowLabel}>Market Fee (2%)</Text>
+                        <Text style={styles.priceRowValue}>
+                          {formatSats(Math.max(546, Math.floor(selectedRunesListing.price_sats * 0.02)))}
+                        </Text>
+                      </View>
+                      <View style={styles.priceRow}>
+                        <Text style={styles.priceRowLabel}>Network Fee</Text>
+                        <Text style={styles.priceRowValue}>~{formatSats(500 * buyRunesFeeRate)}</Text>
+                      </View>
+                      <View style={[styles.priceRow, styles.priceRowTotal]}>
+                        <Text style={styles.priceRowLabelTotal}>Total</Text>
+                        <Text style={styles.buyPriceValue}>
+                          ~{formatSats(
+                            selectedRunesListing.price_sats + 
+                            Math.max(546, Math.floor(selectedRunesListing.price_sats * 0.02)) + 
+                            (500 * buyRunesFeeRate)
+                          )}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                  
+                  {/* Fee Rate */}
+                  <View style={styles.inputSection}>
+                    <Text style={styles.sectionTitle}>NETWORK FEE RATE</Text>
+                    <View style={styles.feeSelector}>
+                      {[
+                        { label: 'Slow', rate: mempoolFees?.slow || 2 },
+                        { label: 'Normal', rate: mempoolFees?.medium || 5 },
+                        { label: 'Fast', rate: mempoolFees?.fast || 10 },
+                      ].map((option) => (
+                        <TouchableOpacity
+                          key={option.label}
+                          style={[
+                            styles.feeOption,
+                            buyRunesFeeRate === option.rate && styles.feeOptionActive
+                          ]}
+                          onPress={() => setBuyRunesFeeRate(option.rate)}
+                        >
+                          <Text style={[
+                            styles.feeOptionLabel,
+                            buyRunesFeeRate === option.rate && styles.feeOptionLabelActive
+                          ]}>{option.label}</Text>
+                          <Text style={[
+                            styles.feeOptionRate,
+                            buyRunesFeeRate === option.rate && styles.feeOptionRateActive
+                          ]}>{option.rate} sat/vB</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                  
+                  {/* Password */}
+                  <View style={styles.inputSection}>
+                    <Text style={styles.sectionTitle}>WALLET PASSWORD</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Enter password to sign"
+                      placeholderTextColor={colors.textMuted}
+                      value={buyRunesPassword}
+                      onChangeText={setBuyRunesPassword}
+                      secureTextEntry
+                    />
+                  </View>
+                  
+                  {buyRunesError ? (
+                    <View style={styles.errorBox}>
+                      <Ionicons name="alert-circle" size={16} color={colors.error} />
+                      <Text style={styles.errorText}>{buyRunesError}</Text>
+                    </View>
+                  ) : null}
+                  
+                  <TouchableOpacity
+                    style={[styles.primaryButton, { backgroundColor: '#ff6b35' }, (isBuyingRunes || !buyRunesPassword) && styles.buttonDisabled]}
+                    onPress={handleBuyRunes}
+                    disabled={isBuyingRunes || !buyRunesPassword}
+                  >
+                    {isBuyingRunes ? (
+                      <ActivityIndicator color="#000" />
+                    ) : (
+                      <>
+                        <Ionicons name="card" size={20} color="#000" />
+                        <Text style={[styles.primaryButtonText, { color: '#000' }]}>Buy Runes</Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -2687,6 +3130,42 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textMuted,
     marginTop: 12,
+  },
+  // 🪙 Runes Market Styles
+  runeBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: '#ff6b35',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  runeBadgeText: {
+    fontSize: 8,
+    fontWeight: '700',
+    color: '#000',
+  },
+  runeAmountText: {
+    fontSize: 9,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  runePricePerToken: {
+    fontSize: 8,
+    color: '#ff6b35',
+    marginTop: 1,
+  },
+  runesListContainer: {
+    marginTop: 8,
+  },
+  runesSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ff6b35',
+    marginLeft: 16,
+    marginBottom: 8,
+    marginTop: 16,
   },
 });
 
