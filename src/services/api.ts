@@ -1288,6 +1288,42 @@ export interface RunesListing {
   seller_signature?: string;
   status: 'OPEN' | 'PENDING' | 'SOLD' | 'CANCELLED';
   created_at: string;
+  // Parent inscription thumbnail
+  thumbnail?: string;
+  parent?: string;
+}
+
+// Cache for rune thumbnails (runeId -> thumbnail URL)
+const runeThumbnailCache: Map<string, string> = new Map();
+
+// Get Rune Parent Thumbnail
+async function getRuneParentThumbnail(runeId: string): Promise<string | null> {
+  // Check cache first
+  if (runeThumbnailCache.has(runeId)) {
+    return runeThumbnailCache.get(runeId) || null;
+  }
+  
+  try {
+    // Fetch from Hiro API
+    const res = await fetch(`https://api.hiro.so/runes/v1/etchings/${runeId}`, {
+      headers: { 'Accept': 'application/json' }
+    });
+    
+    if (res.ok) {
+      const data = await res.json();
+      // Check if has a parent inscription from etching
+      const etchingTxId = data.location?.tx_id;
+      if (etchingTxId) {
+        const thumbnail = `https://ordinals.com/content/${etchingTxId}i0`;
+        runeThumbnailCache.set(runeId, thumbnail);
+        return thumbnail;
+      }
+    }
+  } catch (e) {
+    console.log('Could not fetch rune parent:', runeId);
+  }
+  
+  return null;
 }
 
 // Get All Runes Listings
@@ -1299,7 +1335,24 @@ export async function getRunesListings(limit: number = 50): Promise<RunesListing
       return [];
     }
     const data = await res.json();
-    return data.listings || [];
+    const listings: RunesListing[] = data.listings || [];
+    
+    // Enrich listings with parent thumbnails
+    const enrichedListings = await Promise.all(
+      listings.map(async (listing) => {
+        // If listing already has thumbnail, use it
+        if (listing.thumbnail) return listing;
+        
+        // Otherwise try to fetch parent thumbnail
+        const thumbnail = await getRuneParentThumbnail(listing.rune_id);
+        return {
+          ...listing,
+          thumbnail: thumbnail || undefined,
+        };
+      })
+    );
+    
+    return enrichedListings;
   } catch (error) {
     console.error('Error fetching runes listings:', error);
     return [];

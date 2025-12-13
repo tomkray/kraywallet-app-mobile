@@ -767,15 +767,26 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
     const displayAmount = Number(item.sell_amount) / Math.pow(10, item.divisibility || 0);
     const pricePerToken = (item.price_sats / displayAmount).toFixed(2);
     
+    // Use parent thumbnail if available, otherwise fallback to symbol
+    const hasThumbnail = !!item.thumbnail;
+    
     return (
       <TouchableOpacity 
         style={styles.listingCard}
         onPress={() => openBuyRunesModal(item)}
         activeOpacity={0.8}
       >
-        {/* Rune Symbol/Icon */}
-        <View style={[styles.listingThumbnail, { backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' }]}>
-          <Text style={{ fontSize: 32 }}>{item.rune_symbol || '⧈'}</Text>
+        {/* Rune Thumbnail or Symbol */}
+        <View style={[styles.listingThumbnail, !hasThumbnail && { backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' }]}>
+          {hasThumbnail ? (
+            <Image
+              source={{ uri: item.thumbnail }}
+              style={styles.thumbnailImage}
+              resizeMode="cover"
+            />
+          ) : (
+            <Text style={{ fontSize: 32 }}>{item.rune_symbol || '⧈'}</Text>
+          )}
           <View style={styles.runeBadge}>
             <Text style={styles.runeBadgeText}>RUNE</Text>
           </View>
