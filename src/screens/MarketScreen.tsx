@@ -177,6 +177,13 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
     }
   }, [showBuyModal]);
 
+  // Fetch real fee rates from mempool.space when buy RUNES modal opens
+  useEffect(() => {
+    if (showBuyRunesModal) {
+      fetchMempoolFees();
+    }
+  }, [showBuyRunesModal]);
+
   const fetchMempoolFees = async () => {
     try {
       const res = await fetch('https://mempool.space/api/v1/fees/recommended');
@@ -1623,6 +1630,12 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
                         </TouchableOpacity>
                       ))}
                     </View>
+                    
+                    {mempoolFees && (
+                      <Text style={styles.feesSource}>
+                        📊 Live from mempool.space
+                      </Text>
+                    )}
                   </View>
                   
                   {/* Password */}
