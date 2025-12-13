@@ -961,9 +961,10 @@ export async function getAtomicSwapListings(sellerAddress?: string): Promise<Ato
 // Get Buy Now Listings (same as extension prod)
 export async function getBuyNowListings(inscriptionId?: string): Promise<BuyNowListing[]> {
   try {
+    // Correct endpoint: /api/atomic-swap/ (not /buy-now)
     const url = inscriptionId
-      ? `${API_URL}/api/atomic-swap/buy-now?inscription_id=${inscriptionId}`
-      : `${API_URL}/api/atomic-swap/buy-now`;
+      ? `${API_URL}/api/atomic-swap/?inscription_id=${inscriptionId}`
+      : `${API_URL}/api/atomic-swap/`;
     
     const res = await fetch(url);
     if (!res.ok) return [];
