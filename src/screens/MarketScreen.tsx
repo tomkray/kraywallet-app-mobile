@@ -1497,7 +1497,7 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
           </View>
         </Modal>
 
-        {/* 🪙 Buy Runes Modal */}
+        {/* ⧈ Buy Runes Modal */}
         <Modal
           visible={showBuyRunesModal}
           transparent
@@ -1508,7 +1508,7 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
             <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>
-                  {buyRunesStep === 'signing' ? '🔏 Signing...' : '🪙 Buy Runes'}
+                  {buyRunesStep === 'signing' ? '🔏 Signing...' : '⧈ Buy Runes'}
                 </Text>
                 <TouchableOpacity onPress={() => setShowBuyRunesModal(false)}>
                   <Ionicons name="close" size={24} color={colors.textPrimary} />
@@ -1524,10 +1524,18 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
               ) : selectedRunesListing && (
                 <>
                   <View style={styles.buyDetails}>
-                    {/* Rune Info */}
+                    {/* Rune Info with Parent Thumbnail */}
                     <View style={[styles.buyItem, { alignItems: 'center' }]}>
-                      <View style={[styles.buyItemThumbnail, { backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' }]}>
-                        <Text style={{ fontSize: 32 }}>{selectedRunesListing.rune_symbol || '⧈'}</Text>
+                      <View style={[styles.buyItemThumbnail, !selectedRunesListing.thumbnail && { backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' }]}>
+                        {selectedRunesListing.thumbnail ? (
+                          <Image
+                            source={{ uri: selectedRunesListing.thumbnail }}
+                            style={{ width: '100%', height: '100%', borderRadius: 8 }}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <Text style={{ fontSize: 32 }}>{selectedRunesListing.rune_symbol || '⧈'}</Text>
+                        )}
                       </View>
                       <View style={styles.buyItemInfo}>
                         <Text style={styles.buyItemName} numberOfLines={1}>
