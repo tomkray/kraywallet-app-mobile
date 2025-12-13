@@ -783,15 +783,20 @@ export async function requestL2Withdraw(params: {
   return res.json();
 }
 
-// Get Pending Withdrawals - endpoint may not exist yet
+// Get Pending Withdrawals
 export async function getPendingWithdrawals(address: string): Promise<any[]> {
   try {
-    // Try the withdrawals endpoint (may return 404)
-    const res = await fetch(`${L2_API_URL}/account/${address}/withdrawals`);
-    if (!res.ok) return [];
+    // Correct endpoint for pending withdrawals
+    const res = await fetch(`${L2_API_URL}/bridge/withdrawals/${address}/pending`);
+    if (!res.ok) {
+      // Silently handle 404 - endpoint may not have data
+      return [];
+    }
     const data = await res.json();
+    console.log('✅ Pending withdrawals:', data.withdrawals?.length || 0);
     return data.withdrawals || [];
   } catch (error) {
+    // Silently handle errors - not critical
     return [];
   }
 }
@@ -1566,6 +1571,13 @@ export async function getRunesMarketStats(): Promise<{
 }
 
 // ========== HELPER FUNCTIONS ==========
+
+// Calculate L2 withdrawal fee in sats based on fee rate
+// L2 withdrawals require an on-chain transaction (~150 vbytes)
+export function calculateWithdrawalFeeSats(feeRate: number): number {
+  const WITHDRAWAL_TX_VBYTES = 150; // Approximate vbytes for withdrawal tx
+  return Math.ceil(WITHDRAWAL_TX_VBYTES * feeRate);
+}
 
 // Get My Atomic Swap Listings (seller)
 export async function getMyAtomicSwaps(address: string): Promise<AtomicSwapListing[]> {
