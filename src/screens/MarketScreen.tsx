@@ -144,12 +144,18 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editStep, setEditStep] = useState<'input' | 'cancelling' | 'creating' | 'signing' | 'confirming' | 'success' | 'error'>('input');
   
-  // Cancel Modal
+  // Cancel Modal (Ordinals)
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancellingListing, setCancellingListing] = useState<api.BuyNowListing | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelError, setCancelError] = useState('');
   const [editMessage, setEditMessage] = useState('');
+  
+  // Cancel Modal (Runes)
+  const [showCancelRunesModal, setShowCancelRunesModal] = useState(false);
+  const [cancellingRunesListing, setCancellingRunesListing] = useState<api.RunesListing | null>(null);
+  const [isCancellingRunes, setIsCancellingRunes] = useState(false);
+  const [cancelRunesError, setCancelRunesError] = useState('');
   
   // 🪙 Runes Market - Buy Modal
   const [showBuyRunesModal, setShowBuyRunesModal] = useState(false);
@@ -936,38 +942,44 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
     }
   };
   
-  // Cancel Runes Listing
-  const handleCancelRunesListing = async (listing: api.RunesListing) => {
+  // Cancel Runes Listing - Open modal
+  const handleCancelRunesListing = (listing: api.RunesListing) => {
     if (!wallet?.address) return;
+    setCancellingRunesListing(listing);
+    setCancelRunesError('');
+    setShowCancelRunesModal(true);
+  };
+  
+  // Confirm Cancel Runes Listing
+  const confirmCancelRunesListing = async () => {
+    if (!cancellingRunesListing || !wallet?.address) return;
     
-    Alert.alert(
-      'Cancel Listing',
-      `Cancel ${listing.rune_name} listing for ${formatSats(listing.price_sats)}?`,
-      [
-        { text: 'No', style: 'cancel' },
-        {
-          text: 'Yes, Cancel',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const result = await api.cancelRunesListing({
-                orderId: listing.order_id,
-                sellerAddress: wallet.address!,
-              });
-              
-              if (result.success) {
-                Alert.alert('Success', 'Listing cancelled successfully');
-                await loadListings();
-              } else {
-                Alert.alert('Error', result.error || 'Failed to cancel listing');
-              }
-            } catch (error: any) {
-              Alert.alert('Error', error.message);
-            }
-          },
-        },
-      ]
-    );
+    setIsCancellingRunes(true);
+    setCancelRunesError('');
+    
+    try {
+      console.log('🗑️ Cancelling Runes listing:', cancellingRunesListing.order_id);
+      
+      const result = await api.cancelRunesListing({
+        orderId: cancellingRunesListing.order_id,
+        sellerAddress: wallet.address,
+      });
+      
+      if (result.success) {
+        console.log('✅ Runes listing cancelled successfully');
+        setShowCancelRunesModal(false);
+        setCancellingRunesListing(null);
+        await loadListings();
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        setCancelRunesError(result.error || 'Failed to cancel listing');
+      }
+    } catch (error: any) {
+      console.error('❌ Cancel Runes error:', error);
+      setCancelRunesError(error.message || 'Failed to cancel listing');
+    } finally {
+      setIsCancellingRunes(false);
+    }
   };
 
   return (
@@ -1833,7 +1845,7 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
           </View>
         </Modal>
 
-        {/* Cancel Listing Modal */}
+        {/* Cancel Listing Modal (Ordinals) */}
         <Modal
           visible={showCancelModal}
           transparent
@@ -1895,6 +1907,90 @@ export function MarketScreen({ onBack }: MarketScreenProps) {
                   disabled={isCancelling}
                 >
                   {isCancelling ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="trash" size={18} color="#fff" />
+                      <Text style={styles.cancelModalYesText}>Cancel Listing</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Cancel Runes Listing Modal */}
+        <Modal
+          visible={showCancelRunesModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => !isCancellingRunes && setShowCancelRunesModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { maxHeight: 400 }]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>⧈ Cancel Rune Listing</Text>
+                {!isCancellingRunes && (
+                  <TouchableOpacity onPress={() => setShowCancelRunesModal(false)}>
+                    <Ionicons name="close" size={24} color={colors.textPrimary} />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {cancellingRunesListing && (
+                <View style={styles.editListingInfo}>
+                  <View style={[styles.editThumbnail, !cancellingRunesListing.thumbnail && { backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' }]}>
+                    {cancellingRunesListing.thumbnail ? (
+                      <Image
+                        source={{ uri: cancellingRunesListing.thumbnail }}
+                        style={{ width: '100%', height: '100%', borderRadius: 8 }}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <Text style={{ fontSize: 32 }}>{cancellingRunesListing.rune_symbol || '⧈'}</Text>
+                    )}
+                  </View>
+                  <View style={styles.editListingDetails}>
+                    <Text style={styles.editListingId} numberOfLines={1}>
+                      {cancellingRunesListing.rune_name}
+                    </Text>
+                    <Text style={[styles.editCurrentPrice, { color: '#ff6b35' }]}>
+                      {(Number(cancellingRunesListing.sell_amount) / Math.pow(10, cancellingRunesListing.divisibility || 0)).toLocaleString()} tokens
+                    </Text>
+                    <Text style={styles.editCurrentPrice}>
+                      Price: {cancellingRunesListing.price_sats.toLocaleString()} sats
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              <Text style={styles.cancelWarning}>
+                Are you sure you want to cancel this listing? The runes will be removed from the marketplace.
+              </Text>
+
+              {cancelRunesError ? (
+                <View style={styles.errorContainer}>
+                  <Ionicons name="alert-circle" size={20} color={colors.error} />
+                  <Text style={styles.errorText}>{cancelRunesError}</Text>
+                </View>
+              ) : null}
+
+              <View style={styles.cancelModalButtons}>
+                <TouchableOpacity
+                  style={styles.cancelModalNoButton}
+                  onPress={() => setShowCancelRunesModal(false)}
+                  disabled={isCancellingRunes}
+                >
+                  <Text style={styles.cancelModalNoText}>Keep Listed</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[styles.cancelModalYesButton, isCancellingRunes && styles.buttonDisabled]}
+                  onPress={confirmCancelRunesListing}
+                  disabled={isCancellingRunes}
+                >
+                  {isCancellingRunes ? (
                     <ActivityIndicator size="small" color="#fff" />
                   ) : (
                     <>
