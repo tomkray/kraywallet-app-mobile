@@ -1,6 +1,6 @@
 /**
  * Runes Tab Component
- * Display user's runes with Transfer functionality
+ * Display user's runes with Transfer and List for Sale functionality
  * KRAY OS Style - Same as extension production
  */
 
@@ -19,11 +19,13 @@ import {
   SafeAreaView,
   Image,
   Linking,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import { WebQRScanner } from '../WebQRScanner';
+import * as api from '../../services/api';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -47,17 +49,32 @@ interface RunesTabProps {
   runes: Rune[];
   walletAddress?: string;
   onTransfer?: (rune: Rune, toAddress: string, amount: string, password: string) => Promise<string>;
+  // Signing function for List for Sale
+  onSignPsbt?: (psbtBase64: string, password: string, sighashType?: number) => Promise<string | null>;
   // External success state (elevated to parent to survive re-renders)
   externalSuccessTxid?: string | null;
   onClearSuccess?: () => void;
 }
 
-export function RunesTab({ runes, walletAddress, onTransfer, externalSuccessTxid, onClearSuccess }: RunesTabProps) {
+export function RunesTab({ runes, walletAddress, onTransfer, onSignPsbt, externalSuccessTxid, onClearSuccess }: RunesTabProps) {
+  // Action Selector Modal (Send vs List for Sale)
+  const [showActionModal, setShowActionModal] = useState(false);
+  
   // Transfer Modal State
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [selectedRune, setSelectedRune] = useState<Rune | null>(null);
   const [transferTo, setTransferTo] = useState('');
   const [transferAmount, setTransferAmount] = useState('');
+  
+  // List for Sale Modal State
+  const [showListModal, setShowListModal] = useState(false);
+  const [listAmount, setListAmount] = useState('');
+  const [listPrice, setListPrice] = useState('');
+  const [listPassword, setListPassword] = useState('');
+  const [showListPassword, setShowListPassword] = useState(false);
+  const [isListing, setIsListing] = useState(false);
+  const [listError, setListError] = useState('');
+  const [listSuccess, setListSuccess] = useState(false);
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isTransferring, setIsTransferring] = useState(false);
@@ -96,21 +113,179 @@ export function RunesTab({ runes, walletAddress, onTransfer, externalSuccessTxid
     });
   };
 
-  // Open Transfer Modal
+  // Open Action Selector Modal
   const handleRunePress = (rune: Rune) => {
     setSelectedRune(rune);
+    setShowActionModal(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+  
+  // Open Transfer Modal from Action Selector
+  const openTransferModal = () => {
+    setShowActionModal(false);
     setTransferTo('');
     setTransferAmount('');
     setPassword('');
     setTransferError('');
     setLocalSuccessTxid(null);
-    // Clear external success state if provided
     if (onClearSuccess) {
       onClearSuccess();
     }
     setCopiedTxid(false);
     setShowTransferModal(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+  
+  // Open List for Sale Modal from Action Selector
+  const openListModal = () => {
+    setShowActionModal(false);
+    setListAmount('');
+    setListPrice('');
+    setListPassword('');
+    setListError('');
+    setListSuccess(false);
+    setShowListModal(true);
+  };
+  
+  // Handle List for Sale
+  const handleListForSale = async () => {
+    if (!selectedRune || !walletAddress || !onSignPsbt) return;
+    
+    if (!listAmount || parseFloat(listAmount) <= 0) {
+      setListError('Please enter a valid amount');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+    
+    if (!listPrice || parseInt(listPrice) < 546) {
+      setListError('Price must be at least 546 sats');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+    
+    const maxAmount = selectedRune.formattedAmount 
+      ? parseFloat(selectedRune.formattedAmount.replace(/,/g, ''))
+      : (selectedRune.balance || 0) / Math.pow(10, selectedRune.divisibility || 0);
+    
+    if (parseFloat(listAmount) > maxAmount) {
+      setListError('Amount exceeds available balance');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+    
+    if (!listPassword) {
+      setListError('Please enter your password to sign');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+    
+    // Get UTXO info
+    const utxo = selectedRune.utxos?.[0];
+    if (!utxo) {
+      setListError('No UTXO found for this rune. Please try again later.');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+    
+    setIsListing(true);
+    setListError('');
+    
+    try {
+      console.log('🪙 Creating rune listing...');
+      console.log('   Rune:', selectedRune.name);
+      console.log('   Amount:', listAmount);
+      console.log('   Price:', listPrice, 'sats');
+      
+      // Calculate raw amounts
+      const rawSellAmount = Math.floor(parseFloat(listAmount) * Math.pow(10, selectedRune.divisibility || 0));
+      const rawTotalAmount = selectedRune.rawAmount || rawSellAmount;
+      
+      // Get script pubkey from mempool
+      const txRes = await fetch(`https://mempool.space/api/tx/${utxo.txid}`);
+      const txData = await txRes.json();
+      const scriptPubKey = txData.vout[utxo.vout].scriptpubkey;
+      const sellerValue = txData.vout[utxo.vout].value;
+      
+      console.log('   UTXO:', `${utxo.txid}:${utxo.vout}`);
+      console.log('   Value:', sellerValue, 'sats');
+      
+      // Step 1: Create listing
+      const createRes = await api.createRunesListing({
+        runeId: selectedRune.runeId || selectedRune.id,
+        runeName: selectedRune.name,
+        runeSymbol: selectedRune.symbol,
+        sellAmount: rawSellAmount.toString(),
+        totalAmount: rawTotalAmount.toString(),
+        divisibility: selectedRune.divisibility || 0,
+        sellerTxid: utxo.txid,
+        sellerVout: utxo.vout,
+        sellerValue: sellerValue,
+        sellerScriptPubKey: scriptPubKey,
+        priceSats: parseInt(listPrice),
+        sellerPayoutAddress: walletAddress,
+      });
+      
+      if (!createRes.success || !createRes.psbt_base64 || !createRes.order_id) {
+        throw new Error(createRes.error || 'Failed to create listing');
+      }
+      
+      console.log('📝 Listing created, signing PSBT...');
+      console.log('   Order ID:', createRes.order_id);
+      
+      // Step 2: Sign with SIGHASH_SINGLE|ANYONECANPAY (0x83)
+      const signedPsbt = await onSignPsbt(createRes.psbt_base64, listPassword, 0x83);
+      
+      if (!signedPsbt) {
+        throw new Error('Failed to sign PSBT. Check your password.');
+      }
+      
+      console.log('✅ PSBT signed, submitting...');
+      
+      // Step 3: Submit signature
+      const signRes = await api.signRunesListing({
+        orderId: createRes.order_id,
+        signedPsbtBase64: signedPsbt,
+      });
+      
+      if (!signRes.success) {
+        throw new Error(signRes.error || 'Failed to submit signature');
+      }
+      
+      console.log('🎉 Listing created successfully!');
+      
+      setListSuccess(true);
+      setListPassword('');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      
+      // Auto close after success
+      setTimeout(() => {
+        setShowListModal(false);
+        setListSuccess(false);
+      }, 3000);
+      
+    } catch (error: any) {
+      console.error('❌ List for sale error:', error);
+      setListError(error.message || 'Failed to create listing');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setIsListing(false);
+    }
+  };
+  
+  // Handle List Max Amount
+  const handleListMaxAmount = () => {
+    if (selectedRune) {
+      const maxAmount = formatBalance(selectedRune.balance, selectedRune.divisibility || 0, selectedRune.formattedAmount);
+      setListAmount(maxAmount.replace(/,/g, ''));
+    }
+  };
+  
+  // Calculate price per token
+  const pricePerToken = () => {
+    if (!listAmount || !listPrice) return '--';
+    const amount = parseFloat(listAmount);
+    const price = parseInt(listPrice);
+    if (amount <= 0 || price <= 0) return '--';
+    return (price / amount).toFixed(2);
   };
 
   // Handle Transfer
@@ -424,6 +599,232 @@ export function RunesTab({ runes, walletAddress, onTransfer, externalSuccessTxid
               Network fee will be calculated based on current rates
             </Text>
           </View>
+        </View>
+      </Modal>
+
+      {/* Action Selector Modal (Send vs List for Sale) */}
+      <Modal
+        visible={showActionModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowActionModal(false)}
+      >
+        <TouchableOpacity 
+          style={styles.actionModalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowActionModal(false)}
+        >
+          <View style={styles.actionModalContent}>
+            {/* Rune Info */}
+            <View style={styles.actionRuneInfo}>
+              <View style={styles.runeIconLarge}>
+                {selectedRune?.thumbnail ? (
+                  <Image 
+                    source={{ uri: selectedRune.thumbnail }} 
+                    style={styles.runeThumbnailLarge}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <Text style={styles.runeSymbolLarge}>{selectedRune?.symbol || '◆'}</Text>
+                )}
+              </View>
+              <Text style={styles.actionRuneName}>{selectedRune?.name}</Text>
+              <Text style={styles.actionRuneBalance}>
+                {selectedRune && formatBalance(selectedRune.balance, selectedRune.divisibility || 0, selectedRune.formattedAmount)} {selectedRune?.symbol}
+              </Text>
+            </View>
+            
+            {/* Action Buttons */}
+            <View style={styles.actionButtons}>
+              <TouchableOpacity 
+                style={styles.actionButton}
+                onPress={openTransferModal}
+              >
+                <View style={[styles.actionButtonIcon, { backgroundColor: 'rgba(16, 185, 129, 0.2)' }]}>
+                  <Ionicons name="arrow-up" size={24} color="#10b981" />
+                </View>
+                <Text style={styles.actionButtonText}>Send</Text>
+                <Text style={styles.actionButtonHint}>Transfer to another wallet</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.actionButton}
+                onPress={openListModal}
+              >
+                <View style={[styles.actionButtonIcon, { backgroundColor: 'rgba(255, 107, 53, 0.2)' }]}>
+                  <Ionicons name="pricetag" size={24} color="#ff6b35" />
+                </View>
+                <Text style={styles.actionButtonText}>List for Sale</Text>
+                <Text style={styles.actionButtonHint}>Sell on Runes Market</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {/* Close Button */}
+            <TouchableOpacity 
+              style={styles.actionCloseButton}
+              onPress={() => setShowActionModal(false)}
+            >
+              <Text style={styles.actionCloseText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* List for Sale Modal */}
+      <Modal
+        visible={showListModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowListModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <ScrollView 
+            style={styles.listModalScroll}
+            contentContainerStyle={styles.listModalScrollContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.modalContent}>
+              {/* Header */}
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>
+                  🪙 List {selectedRune?.symbol || selectedRune?.name || 'Rune'} for Sale
+                </Text>
+                <TouchableOpacity onPress={() => setShowListModal(false)}>
+                  <Ionicons name="close" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Success State */}
+              {listSuccess ? (
+                <View style={styles.successScreen}>
+                  <Ionicons name="checkmark-circle" size={60} color="#10b981" />
+                  <Text style={styles.successTitle}>Listing Created!</Text>
+                  <Text style={styles.successSubtitle}>
+                    Your runes are now listed on the market
+                  </Text>
+                  <Text style={styles.listSuccessNote}>
+                    View your listing in the Market tab
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  {/* Rune Info */}
+                  <View style={styles.runeInfoCard}>
+                    <View style={styles.runeIconLarge}>
+                      {selectedRune?.thumbnail ? (
+                        <Image 
+                          source={{ uri: selectedRune.thumbnail }} 
+                          style={styles.runeThumbnailLarge}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <Text style={styles.runeSymbolLarge}>{selectedRune?.symbol || '◆'}</Text>
+                      )}
+                    </View>
+                    <View>
+                      <Text style={styles.runeNameLarge}>{selectedRune?.name}</Text>
+                      <Text style={styles.runeBalanceLarge}>
+                        Available: {selectedRune && formatBalance(selectedRune.balance, selectedRune.divisibility || 0, selectedRune.formattedAmount)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Amount to Sell */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>AMOUNT TO SELL</Text>
+                    <View style={styles.inputRow}>
+                      <TextInput
+                        style={[styles.input, { flex: 1 }]}
+                        placeholder="0"
+                        placeholderTextColor="#666"
+                        value={listAmount}
+                        onChangeText={setListAmount}
+                        keyboardType="decimal-pad"
+                      />
+                      <TouchableOpacity style={styles.maxButton} onPress={handleListMaxAmount}>
+                        <Text style={styles.maxButtonText}>MAX</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Price in Sats */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>TOTAL PRICE (SATS)</Text>
+                    <View style={styles.inputRow}>
+                      <TextInput
+                        style={[styles.input, { flex: 1 }]}
+                        placeholder="Minimum 546 sats"
+                        placeholderTextColor="#666"
+                        value={listPrice}
+                        onChangeText={setListPrice}
+                        keyboardType="number-pad"
+                      />
+                      <Text style={styles.satsLabel}>sats</Text>
+                    </View>
+                    <Text style={styles.pricePerTokenHint}>
+                      Price per token: {pricePerToken()} sats
+                    </Text>
+                  </View>
+
+                  {/* Error */}
+                  {listError ? (
+                    <View style={styles.errorBox}>
+                      <Ionicons name="alert-circle" size={16} color="#ef4444" />
+                      <Text style={styles.errorText}>{listError}</Text>
+                    </View>
+                  ) : null}
+
+                  {/* Password */}
+                  <View style={styles.passwordSection}>
+                    <Text style={styles.passwordLabel}>🔑 ENTER PASSWORD TO SIGN</Text>
+                    <View style={styles.passwordContainer}>
+                      <TextInput
+                        style={styles.passwordInput}
+                        placeholder="Your wallet password"
+                        placeholderTextColor="#666"
+                        value={listPassword}
+                        onChangeText={setListPassword}
+                        secureTextEntry={!showListPassword}
+                        autoCapitalize="none"
+                      />
+                      <TouchableOpacity
+                        style={styles.passwordToggle}
+                        onPress={() => setShowListPassword(!showListPassword)}
+                      >
+                        <Ionicons 
+                          name={showListPassword ? "eye-off" : "eye"} 
+                          size={20} 
+                          color="#666" 
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Create Listing Button */}
+                  <TouchableOpacity
+                    style={[styles.listButton, isListing && styles.transferButtonDisabled]}
+                    onPress={handleListForSale}
+                    disabled={isListing}
+                  >
+                    {isListing ? (
+                      <ActivityIndicator color="#000" />
+                    ) : (
+                      <>
+                        <Ionicons name="pricetag" size={20} color="#000" />
+                        <Text style={styles.listButtonText}>Create Listing</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  {/* Info Note */}
+                  <Text style={styles.listNote}>
+                    Your runes will be listed on the KRAY Runes Market.{'\n'}
+                    A 2% market fee applies when sold.
+                  </Text>
+                </>
+              )}
+            </View>
+          </ScrollView>
         </View>
       </Modal>
 
@@ -879,5 +1280,124 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
     textAlign: 'center',
+  },
+  // Action Modal Styles
+  actionModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  actionModalContent: {
+    backgroundColor: '#111',
+    borderRadius: 24,
+    padding: 24,
+    width: '100%',
+    maxWidth: 340,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  actionRuneInfo: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  actionRuneName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+    marginTop: 12,
+  },
+  actionRuneBalance: {
+    fontSize: 14,
+    color: '#888',
+    marginTop: 4,
+  },
+  actionButtons: {
+    width: '100%',
+    gap: 12,
+  },
+  actionButton: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  actionButtonIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  actionButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  actionButtonHint: {
+    fontSize: 13,
+    color: '#888',
+  },
+  actionCloseButton: {
+    marginTop: 16,
+    padding: 12,
+  },
+  actionCloseText: {
+    fontSize: 15,
+    color: '#888',
+    fontWeight: '600',
+  },
+  // List for Sale Modal Styles
+  listModalScroll: {
+    flex: 1,
+  },
+  listModalScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'flex-end',
+  },
+  satsLabel: {
+    fontSize: 14,
+    color: '#888',
+    marginLeft: 12,
+    fontWeight: '600',
+  },
+  pricePerTokenHint: {
+    fontSize: 12,
+    color: '#f7931a',
+    marginTop: 6,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  listButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: '#ff6b35',
+    padding: 16,
+    borderRadius: 14,
+    marginTop: 8,
+  },
+  listButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000',
+  },
+  listNote: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 12,
+    lineHeight: 18,
+  },
+  listSuccessNote: {
+    fontSize: 14,
+    color: '#10b981',
+    marginTop: 16,
+    fontWeight: '600',
   },
 });

@@ -47,7 +47,7 @@ type TabType = 'ordinals' | 'runes' | 'activity' | 'l2';
 type NetworkType = 'mainnet' | 'kray-l2' | 'testnet';
 
 export function MainWalletScreen({ onSettings, onSend, onReceive, onAtomicSwap, onMarket }: MainWalletScreenProps) {
-  const { wallet, network, l2, refreshAll, switchNetwork, sendL2, withdrawL2, sendOrdinal, sendRune } = useWallet();
+  const { wallet, network, l2, refreshAll, switchNetwork, sendL2, withdrawL2, sendOrdinal, sendRune, signPsbt } = useWallet();
   
   const [activeTab, setActiveTab] = useState<TabType>('ordinals');
   const [refreshing, setRefreshing] = useState(false);
@@ -490,6 +490,10 @@ export function MainWalletScreen({ onSettings, onSend, onReceive, onAtomicSwap, 
                         setRuneSuccessTxid(txid);
                       }
                       return txid;
+                    }}
+                    onSignPsbt={async (psbtBase64, password, sighashType) => {
+                      // Sign PSBT for List for Sale (SIGHASH_SINGLE|ANYONECANPAY = 0x83)
+                      return await signPsbt(psbtBase64, password, sighashType);
                     }}
                   />
                 )}

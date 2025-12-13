@@ -127,24 +127,9 @@ export async function getBalance(address: string): Promise<{
 // Get UTXOs
 export async function getUTXOs(address: string): Promise<any[]> {
   try {
-    // Use backend endpoint which returns enriched UTXOs with scriptPubKey, inscriptions, runes
-    console.log('📦 Fetching enriched UTXOs from backend...');
-    const res = await fetch(`${API_URL}/api/wallet/utxos/${address}`);
-    if (!res.ok) {
-      // Fallback to mempool.space
-      console.log('⚠️ Backend UTXOs failed, falling back to mempool.space');
-      const fallbackRes = await fetch(`https://mempool.space/api/address/${address}/utxo`);
-      if (!fallbackRes.ok) throw new Error('Failed to fetch UTXOs');
-      return fallbackRes.json();
-    }
-    const data = await res.json();
-    console.log('📦 UTXOs loaded:', {
-      total: data.utxos?.length || 0,
-      pure: data.utxos?.filter((u: any) => !u.hasInscription && !u.hasRunes).length || 0,
-      withInscriptions: data.utxos?.filter((u: any) => u.hasInscription).length || 0,
-      withRunes: data.utxos?.filter((u: any) => u.hasRunes).length || 0
-    });
-    return data.utxos || [];
+    const res = await fetch(`https://mempool.space/api/address/${address}/utxo`);
+    if (!res.ok) throw new Error('Failed to fetch UTXOs');
+    return res.json();
   } catch (error) {
     console.error('Error fetching UTXOs:', error);
     return [];
@@ -756,211 +741,57 @@ export async function l2Transfer(params: {
   toAddress: string;
   amount: number;
   token: string;
-  signature: string;
-  pubkey: string;
-  nonce: number;
 }): Promise<{ tx_hash: string; success: boolean }> {
-  // Correct endpoint: /l2/transaction/send
-  const res = await fetch(`${L2_API_URL}/transaction/send`, {
+  const res = await fetch(`${L2_API_URL}/transfer`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from_account: params.fromAddress,
-      to_account: params.toAddress,
+      from: params.fromAddress,
+      to: params.toAddress,
       amount: params.amount.toString(),
-      signature: params.signature,
-      pubkey: params.pubkey,
-      nonce: params.nonce,
-      tx_type: 'transfer'
+      token: params.token,
     }),
   });
   
   if (!res.ok) {
     const error = await res.json();
-    throw new Error(error.error || error.message || 'Failed to transfer');
+    throw new Error(error.message || 'Failed to transfer');
   }
   return res.json();
 }
 
-// Get L2 account nonce (for signing transactions)
-export async function getL2Nonce(address: string): Promise<number> {
-  try {
-    const res = await fetch(`${L2_API_URL}/account/${address}/balance`);
-    if (!res.ok) return 0;
-    const data = await res.json();
-    return data.nonce || 0;
-  } catch (error) {
-    return 0;
-  }
-}
-
-// ========== L2 WITHDRAWAL FUNCTIONS (IGUAL EXTENSION) ==========
-
-// Fee UTXO type for withdrawals
-export interface FeeUtxo {
-  txid: string;
-  vout: number;
-  value: number;
-  scriptPubKey?: string;
-}
-
-// Sign L2 Message with Schnorr (via backend)
-export async function signL2Message(params: {
-  mnemonic: string;
-  messageData: {
-    from: string;
-    to: string;
-    amount: number;
-    nonce: number;
-    type: string;
-  };
-}): Promise<{ signature: string; pubkey: string }> {
-  // Create deterministic message (same format as extension)
-  const message = [
-    params.messageData.from,
-    params.messageData.to || '',
-    params.messageData.amount.toString(),
-    params.messageData.nonce.toString(),
-    params.messageData.type
-  ].join(':');
-  
-  console.log('🔐 Signing L2 message:', message.substring(0, 50) + '...');
-  
-  const res = await fetch(`${API_URL}/api/kraywallet/sign-l2-message`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mnemonic: params.mnemonic, message }),
-  });
-  
-  if (!res.ok) {
-    const error = await res.json();
-    throw new Error(error.error || 'Failed to sign L2 message');
-  }
-  
-  const data = await res.json();
-  return { signature: data.signature, pubkey: data.pubkey };
-}
-
-// Request L2 Withdrawal with Fee UTXO (igual extension - /l2/bridge/withdrawal/user-funded)
-export async function requestL2WithdrawWithUtxo(params: {
-  account_id: string;
-  amount: number;
-  l1_address: string;
-  signature: string;
-  pubkey: string;
-  nonce: number;
-  fee_rate: number;
-  fee_utxo: FeeUtxo;
-  l2_fee: number;
-}): Promise<{
-  withdrawal_id: string;
-  partial_psbt: string;
-  challenge_deadline?: string;
-}> {
-  const res = await fetch(`${L2_API_URL}/bridge/withdrawal/user-funded`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      account_id: params.account_id,
-      amount: params.amount,
-      l1_address: params.l1_address,
-      signature: params.signature,
-      pubkey: params.pubkey,
-      nonce: params.nonce,
-      fee_rate: params.fee_rate,
-      fee_utxo: {
-        txid: params.fee_utxo.txid,
-        vout: params.fee_utxo.vout,
-        value: params.fee_utxo.value,
-        scriptPubKey: params.fee_utxo.scriptPubKey || ''
-      },
-      l2_fee: params.l2_fee
-    }),
-  });
-  
-  if (!res.ok) {
-    const error = await res.json();
-    throw new Error(error.error || 'Failed to create withdrawal PSBT');
-  }
-  
-  return res.json();
-}
-
-// Sign Withdrawal PSBT (user's fee UTXO input only)
-export async function signWithdrawalPsbt(params: {
-  mnemonic: string;
-  psbt_base64: string;
-  inputs_to_sign: number[];
-}): Promise<string> {
-  const res = await fetch(`${API_URL}/api/kraywallet/sign`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      mnemonic: params.mnemonic,
-      psbt: params.psbt_base64,
-      inputsToSign: params.inputs_to_sign,
-      sighashType: 0x01, // SIGHASH_ALL
-      autoFinalize: false,
-    }),
-  });
-  
-  if (!res.ok) {
-    const error = await res.json();
-    throw new Error(error.error || 'Failed to sign withdrawal PSBT');
-  }
-  
-  const data = await res.json();
-  return data.signedPsbt;
-}
-
-// Submit Signed L2 Withdrawal (final step)
-export async function submitSignedL2Withdrawal(params: {
-  withdrawal_id: string;
-  signed_psbt: string;
-}): Promise<{
-  status: string;
-  challenge_deadline?: string;
-  txid?: string;
-}> {
-  const res = await fetch(`${L2_API_URL}/bridge/withdrawal/${params.withdrawal_id}/submit-signed`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      signed_psbt: params.signed_psbt
-    }),
-  });
-  
-  if (!res.ok) {
-    const error = await res.json();
-    throw new Error(error.error || 'Failed to submit signed withdrawal');
-  }
-  
-  return res.json();
-}
-
-// DEPRECATED - use requestL2WithdrawWithUtxo instead
+// L2 Withdraw (POST to backend)
 export async function requestL2Withdraw(params: {
   address: string;
   amount: number;
 }): Promise<{ success: boolean; message?: string }> {
-  console.warn('⚠️ requestL2Withdraw is deprecated. Use requestL2WithdrawWithUtxo instead.');
-  return { success: false, message: 'Use requestL2WithdrawWithUtxo for proper withdrawal flow' };
+  // Withdrawals go back to the same address (bridge requirement)
+  const res = await fetch(`${L2_API_URL}/withdraw`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: params.address,
+      to: params.address, // Same address - bridge requirement
+      amount: params.amount.toString(),
+    }),
+  });
+  
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.message || 'Failed to request withdrawal');
+  }
+  return res.json();
 }
 
-// Get Pending Withdrawals
+// Get Pending Withdrawals - endpoint may not exist yet
 export async function getPendingWithdrawals(address: string): Promise<any[]> {
   try {
-    // Correct endpoint: /l2/bridge/withdrawals/:address/pending
-    const res = await fetch(`${L2_API_URL}/bridge/withdrawals/${address}/pending`);
-    if (!res.ok) {
-      console.log(`⚠️ Pending withdrawals: ${res.status}`);
-      return [];
-    }
+    // Try the withdrawals endpoint (may return 404)
+    const res = await fetch(`${L2_API_URL}/account/${address}/withdrawals`);
+    if (!res.ok) return [];
     const data = await res.json();
-    console.log(`✅ Pending withdrawals: ${data.withdrawals?.length || 0}`);
     return data.withdrawals || [];
   } catch (error) {
-    console.log('⚠️ Pending withdrawals fetch failed:', error);
     return [];
   }
 }
@@ -1094,15 +925,10 @@ export async function checkWalletOnServer(): Promise<{
 export interface BuyNowListing {
   order_id: string;
   inscription_id: string;
-  inscription_number?: number;
-  seller_address?: string;
-  seller_payout_address?: string;  // Backend uses this field
-  seller_txid?: string;
-  seller_vout?: number;
-  seller_value?: number;
+  seller_address: string;
   price_sats: number;
-  status: 'OPEN' | 'PENDING' | 'SOLD' | 'CANCELLED' | 'FILLED' | 'EXPIRED';
-  created_at?: string;
+  status: 'OPEN' | 'PENDING' | 'SOLD' | 'CANCELLED';
+  created_at: string;
   description?: string;
 }
 
@@ -1135,15 +961,13 @@ export async function getAtomicSwapListings(sellerAddress?: string): Promise<Ato
 // Get Buy Now Listings (same as extension prod)
 export async function getBuyNowListings(inscriptionId?: string): Promise<BuyNowListing[]> {
   try {
-    console.log('🔍 Fetching buy now listings from:', `${API_URL}/api/atomic-swap/buy-now/listings`);
     const url = inscriptionId
-      ? `${API_URL}/api/atomic-swap/buy-now/listings?inscription_id=${inscriptionId}`
-      : `${API_URL}/api/atomic-swap/buy-now/listings`;
+      ? `${API_URL}/api/atomic-swap/buy-now?inscription_id=${inscriptionId}`
+      : `${API_URL}/api/atomic-swap/buy-now`;
     
     const res = await fetch(url);
     if (!res.ok) return [];
     const data = await res.json();
-    console.log('📦 Raw listings response:', JSON.stringify(data).slice(0, 500));
     return data.listings || [];
   } catch (error) {
     console.error('Error fetching buy now listings:', error);
@@ -1201,60 +1025,22 @@ export async function createBuyNowListing(params: {
   };
 }
 
-// Confirm Buy Now Listing (seller signs and activates the listing)
-// Uses the same /list endpoint with existing_order_id and signed_psbt
-export async function confirmBuyNowListing(params: {
-  order_id: string;
-  signed_psbt: string;
-}): Promise<{ success: boolean; order_id?: string; status?: string; error?: string }> {
-  const res = await fetch(`${API_URL}/api/atomic-swap/buy-now/list`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      order_id: params.order_id,  // Backend expects 'order_id', not 'existing_order_id'
-      signed_psbt: params.signed_psbt,
-    }),
-  });
-  
-  const data = await res.json();
-  
-  if (!res.ok) {
-    return { success: false, error: data.error || 'Failed to confirm listing' };
-  }
-  
-  return {
-    success: true,
-    order_id: data.order_id,
-    status: data.status,
-  };
-}
-
 // Buy Now - Purchase (same as extension prod)
 export async function buyNowPurchase(params: {
   orderId: string;
   buyerAddress: string;
-  buyerUtxos: Array<{ txid: string; vout: number; value: number }>;
   feeRate?: number;
 }): Promise<{ 
   success: boolean; 
   psbt_base64?: string;
   required_sats?: number;
-  inputsToSign?: number[];
   error?: string;
 }> {
-  console.log('📦 buyNowPurchase:', {
-    orderId: params.orderId,
-    buyerAddress: params.buyerAddress?.slice(0, 15) + '...',
-    utxoCount: params.buyerUtxos?.length,
-    feeRate: params.feeRate
-  });
-  
   const res = await fetch(`${API_URL}/api/atomic-swap/buy-now/${params.orderId}/buy`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       buyer_address: params.buyerAddress,
-      buyer_utxos: params.buyerUtxos,
       fee_rate: params.feeRate || 5,
     }),
   });
@@ -1269,7 +1055,6 @@ export async function buyNowPurchase(params: {
     success: true,
     psbt_base64: data.psbt_base64,
     required_sats: data.required_sats,
-    inputsToSign: data.inputsToSign || data.toSignInputs,
   };
 }
 
@@ -1482,137 +1267,36 @@ export async function cancelAtomicSwap(params: {
   return { success: true };
 }
 
-// ========== HELPER FUNCTIONS ==========
-
-// Get My Atomic Swap Listings (seller)
-export async function getMyAtomicSwaps(address: string): Promise<AtomicSwapListing[]> {
-  return getAtomicSwapListings(address);
-}
-
-// Get Available Atomic Swap Listings (all open)
-export async function getAvailableAtomicSwaps(): Promise<AtomicSwapListing[]> {
-  return getAtomicSwapListings();
-}
-
-// Get Market Listings (alias for buy now)
-export async function getMarketListings(): Promise<BuyNowListing[]> {
-  return getBuyNowListings();
-}
-
-// Get My Market Listings (alias)
-export async function getMyMarketListings(address: string): Promise<BuyNowListing[]> {
-  const allListings = await getBuyNowListings();
-  // Backend returns seller_payout_address, not seller_address
-  return allListings.filter(l => {
-    const sellerAddr = l.seller_address || l.seller_payout_address;
-    console.log(`   Checking listing ${l.order_id}: sellerAddr=${sellerAddr?.slice(0,15)}... vs wallet=${address?.slice(0,15)}...`);
-    return sellerAddr === address;
-  });
-}
-
-// ============================================
-// L2 WITHDRAWAL HELPERS
-// ============================================
-
-/**
- * Calculate the sats needed for an L2 withdrawal transaction
- * Withdrawal tx structure:
- * - 1 input (Taproot): ~58 vBytes
- * - 2 outputs (bridge deposit + change): ~86 vBytes
- * - Overhead: ~10.5 vBytes
- * Total: ~155 vBytes
- */
-export function calculateWithdrawalFeeSats(feeRate: number): number {
-  const TX_VBYTES = 155; // Typical withdrawal tx size
-  const DUST_BUFFER = 546; // Minimum output + safety buffer
-  return Math.ceil(TX_VBYTES * feeRate) + DUST_BUFFER;
-}
-
-/**
- * Get clean UTXOs (no inscriptions/runes) for fee payment
- */
-export async function getCleanUtxos(address: string): Promise<any[]> {
-  try {
-    // Use backend enriched UTXOs endpoint
-    const response = await fetch(`${API_URL}/api/wallet/utxos/${address}`);
-    if (!response.ok) throw new Error('Failed to fetch UTXOs');
-    
-    const data = await response.json();
-    const utxos = data.utxos || [];
-    
-    // Filter out UTXOs with inscriptions or runes (only pure BTC)
-    const cleanUtxos = utxos.filter((utxo: any) => {
-      const hasInscription = utxo.inscription || utxo.inscriptions?.length > 0;
-      const hasRune = utxo.rune || utxo.runes?.length > 0;
-      return !hasInscription && !hasRune;
-    });
-    
-    console.log(`✅ Clean UTXOs: ${cleanUtxos.length}/${utxos.length}`);
-    return cleanUtxos;
-  } catch (error) {
-    console.error('❌ Failed to get clean UTXOs:', error);
-    return [];
-  }
-}
-
-// ========== RUNES ATOMIC SWAP / RUNES MARKET API ==========
-// Endpoints: /api/runes-atomic-swap/...
-// Uses SIGHASH_SINGLE|ANYONECANPAY (0x83) for partial rune sales
+// ========== RUNES ATOMIC SWAP API (/api/runes-atomic-swap) ==========
+// Same endpoints as extension's runes-market.html
 
 export interface RunesListing {
   order_id: string;
   rune_id: string;
   rune_name: string;
-  rune_symbol: string;
-  sell_amount: string;      // Raw amount
-  total_amount: string;     // Raw amount in UTXO
+  rune_symbol?: string;
+  sell_amount: string;
+  total_amount: string;
   divisibility: number;
   price_sats: number;
-  price_per_token: number;
   seller_txid: string;
   seller_vout: number;
+  seller_value: number;
+  seller_script_pubkey: string;
   seller_payout_address: string;
-  status: 'PENDING' | 'OPEN' | 'FILLED' | 'CANCELLED';
+  seller_signature?: string;
+  status: 'OPEN' | 'PENDING' | 'SOLD' | 'CANCELLED';
   created_at: string;
-  thumbnail?: string;
-}
-
-export interface RunesMarketStats {
-  active_listings: number;
-  total_sales: number;
-  total_volume: number;
-  unique_runes: number;
-}
-
-// Get Runes Market Stats
-export async function getRunesMarketStats(): Promise<RunesMarketStats> {
-  try {
-    const res = await fetch(`${API_URL}/api/runes-atomic-swap/stats`);
-    if (!res.ok) throw new Error('Failed to fetch stats');
-    const data = await res.json();
-    return data.stats || { active_listings: 0, total_sales: 0, total_volume: 0, unique_runes: 0 };
-  } catch (error) {
-    console.error('Error fetching runes market stats:', error);
-    return { active_listings: 0, total_sales: 0, total_volume: 0, unique_runes: 0 };
-  }
 }
 
 // Get All Runes Listings
-export async function getRunesListings(params?: {
-  rune_id?: string;
-  seller_address?: string;
-  sort?: 'price_asc' | 'price_desc' | 'amount_desc' | 'recent';
-  limit?: number;
-}): Promise<RunesListing[]> {
+export async function getRunesListings(limit: number = 50): Promise<RunesListing[]> {
   try {
-    let url = `${API_URL}/api/runes-atomic-swap/?limit=${params?.limit || 50}`;
-    if (params?.rune_id) url += `&rune_id=${params.rune_id}`;
-    if (params?.seller_address) url += `&seller_address=${params.seller_address}`;
-    if (params?.sort) url += `&sort=${params.sort}`;
-    
-    console.log('🔍 Fetching runes listings from:', url);
-    const res = await fetch(url);
-    if (!res.ok) return [];
+    const res = await fetch(`${API_URL}/api/runes-atomic-swap/?limit=${limit}`);
+    if (!res.ok) {
+      console.error('Failed to fetch runes listings');
+      return [];
+    }
     const data = await res.json();
     return data.listings || [];
   } catch (error) {
@@ -1634,125 +1318,125 @@ export async function getRunesListing(orderId: string): Promise<RunesListing | n
   }
 }
 
-// Check if UTXO is already listed
-export async function checkRunesUtxoListed(txid: string, vout: number): Promise<boolean> {
-  try {
-    const res = await fetch(`${API_URL}/api/runes-atomic-swap/check/${txid}/${vout}`);
-    if (!res.ok) return false;
-    const data = await res.json();
-    return data.is_listed || false;
-  } catch (error) {
-    return false;
-  }
-}
-
-// Create Runes Listing (Step 1: Get PSBT to sign)
+// Create Runes Listing (Step 1: Create listing, get PSBT to sign)
 export async function createRunesListing(params: {
-  rune_id: string;
-  rune_name: string;
-  rune_symbol?: string;
-  sell_amount: string;        // Raw amount
-  total_amount?: string;      // Raw amount in UTXO
+  runeId: string;
+  runeName: string;
+  runeSymbol?: string;
+  sellAmount: string;
+  totalAmount: string;
   divisibility: number;
-  seller_txid: string;
-  seller_vout: number;
-  seller_value: number;
-  seller_script_pubkey?: string;
-  price_sats: number;
-  seller_payout_address: string;
-}): Promise<{
-  success: boolean;
-  order_id?: string;
-  psbt_base64?: string;
-  error?: string;
-}> {
+  sellerTxid: string;
+  sellerVout: number;
+  sellerValue: number;
+  sellerScriptPubKey: string;
+  priceSats: number;
+  sellerPayoutAddress: string;
+}): Promise<{ success: boolean; order_id?: string; psbt_base64?: string; error?: string }> {
   try {
     const res = await fetch(`${API_URL}/api/runes-atomic-swap/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        rune_id: params.runeId,
+        rune_name: params.runeName,
+        rune_symbol: params.runeSymbol,
+        sell_amount: params.sellAmount,
+        total_amount: params.totalAmount,
+        divisibility: params.divisibility,
+        seller_txid: params.sellerTxid,
+        seller_vout: params.sellerVout,
+        seller_value: params.sellerValue,
+        seller_script_pubkey: params.sellerScriptPubKey,
+        price_sats: params.priceSats,
+        seller_payout_address: params.sellerPayoutAddress,
+      }),
     });
     
     const data = await res.json();
-    if (!res.ok) return { success: false, error: data.error };
     
-    return {
-      success: true,
+    if (!res.ok || !data.success) {
+      return { success: false, error: data.error || 'Failed to create listing' };
+    }
+    
+    return { 
+      success: true, 
       order_id: data.order_id,
       psbt_base64: data.psbt_base64,
     };
   } catch (error: any) {
-    return { success: false, error: error.message };
+    return { success: false, error: error.message || 'Network error' };
   }
 }
 
-// Submit Signed Runes Listing PSBT (Step 2: SIGHASH 0x83)
+// Sign Runes Listing (Step 2: Submit seller signature with SIGHASH_SINGLE|ANYONECANPAY)
 export async function signRunesListing(params: {
-  order_id: string;
-  signed_psbt_base64: string;
-}): Promise<{ success: boolean; status?: string; error?: string }> {
+  orderId: string;
+  signedPsbtBase64: string;
+}): Promise<{ success: boolean; error?: string }> {
   try {
-    const res = await fetch(`${API_URL}/api/runes-atomic-swap/${params.order_id}/sign`, {
+    const res = await fetch(`${API_URL}/api/runes-atomic-swap/${params.orderId}/sign`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ signed_psbt_base64: params.signed_psbt_base64 }),
+      body: JSON.stringify({
+        signed_psbt_base64: params.signedPsbtBase64,
+      }),
     });
     
     const data = await res.json();
-    if (!res.ok) return { success: false, error: data.error };
     
-    return { success: true, status: data.status };
+    if (!res.ok || !data.success) {
+      return { success: false, error: data.error || 'Failed to sign listing' };
+    }
+    
+    return { success: true };
   } catch (error: any) {
-    return { success: false, error: error.message };
+    return { success: false, error: error.message || 'Network error' };
   }
 }
 
-// Buy Runes - Prepare Purchase PSBT (Step 3)
+// Prepare Runes Purchase (Step 1: Get PSBT to sign as buyer)
 export async function buyRunesPrepare(params: {
   orderId: string;
   buyerAddress: string;
   buyerUtxos: Array<{ txid: string; vout: number; value: number; scriptPubKey?: string }>;
-  feeRate?: number;
-}): Promise<{
-  success: boolean;
-  psbt_base64?: string;
+  feeRate: number;
+}): Promise<{ 
+  success: boolean; 
+  psbt_base64?: string; 
   inputs_to_sign?: number[];
-  breakdown?: any;
-  error?: string;
+  required_sats?: number;
+  error?: string 
 }> {
   try {
-    console.log('📦 buyRunesPrepare:', {
-      orderId: params.orderId,
-      buyerAddress: params.buyerAddress?.slice(0, 15) + '...',
-      utxoCount: params.buyerUtxos?.length,
-      feeRate: params.feeRate
-    });
-    
     const res = await fetch(`${API_URL}/api/runes-atomic-swap/${params.orderId}/buy`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         buyer_address: params.buyerAddress,
         buyer_utxos: params.buyerUtxos,
-        fee_rate: params.feeRate || 10,
+        fee_rate: params.feeRate,
       }),
     });
     
     const data = await res.json();
-    if (!res.ok) return { success: false, error: data.error };
+    
+    if (!res.ok || !data.success) {
+      return { success: false, error: data.error || 'Failed to prepare purchase' };
+    }
     
     return {
       success: true,
       psbt_base64: data.psbt_base64,
-      inputs_to_sign: data.inputs_to_sign,
-      breakdown: data.breakdown,
+      inputs_to_sign: data.inputs_to_sign || [],
+      required_sats: data.required_sats,
     };
   } catch (error: any) {
-    return { success: false, error: error.message };
+    return { success: false, error: error.message || 'Network error' };
   }
 }
 
-// Broadcast Runes Purchase (Step 4)
+// Broadcast Runes Purchase (Step 2: Submit signed PSBT)
 export async function buyRunesBroadcast(params: {
   orderId: string;
   signedPsbt: string;
@@ -1769,11 +1453,14 @@ export async function buyRunesBroadcast(params: {
     });
     
     const data = await res.json();
-    if (!res.ok) return { success: false, error: data.error };
+    
+    if (!res.ok || !data.success) {
+      return { success: false, error: data.error || 'Failed to broadcast' };
+    }
     
     return { success: true, txid: data.txid };
   } catch (error: any) {
-    return { success: false, error: error.message };
+    return { success: false, error: error.message || 'Network error' };
   }
 }
 
@@ -1786,21 +1473,65 @@ export async function cancelRunesListing(params: {
     const res = await fetch(`${API_URL}/api/runes-atomic-swap/${params.orderId}`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ seller_address: params.sellerAddress }),
+      body: JSON.stringify({
+        seller_address: params.sellerAddress,
+      }),
     });
     
     const data = await res.json();
-    if (!res.ok) return { success: false, error: data.error };
+    
+    if (!res.ok || !data.success) {
+      return { success: false, error: data.error || 'Failed to cancel listing' };
+    }
     
     return { success: true };
   } catch (error: any) {
-    return { success: false, error: error.message };
+    return { success: false, error: error.message || 'Network error' };
   }
 }
 
-// Get My Runes Listings
-export async function getMyRunesListings(address: string): Promise<RunesListing[]> {
-  return getRunesListings({ seller_address: address });
+// Get Runes Market Stats
+export async function getRunesMarketStats(): Promise<{
+  totalListings: number;
+  totalVolume: number;
+  totalSales: number;
+} | null> {
+  try {
+    const res = await fetch(`${API_URL}/api/runes-atomic-swap/stats`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return {
+      totalListings: data.total_listings || 0,
+      totalVolume: data.total_volume || 0,
+      totalSales: data.total_sales || 0,
+    };
+  } catch (error) {
+    console.error('Error fetching runes market stats:', error);
+    return null;
+  }
+}
+
+// ========== HELPER FUNCTIONS ==========
+
+// Get My Atomic Swap Listings (seller)
+export async function getMyAtomicSwaps(address: string): Promise<AtomicSwapListing[]> {
+  return getAtomicSwapListings(address);
+}
+
+// Get Available Atomic Swap Listings (all open)
+export async function getAvailableAtomicSwaps(): Promise<AtomicSwapListing[]> {
+  return getAtomicSwapListings();
+}
+
+// Get Market Listings (alias for buy now)
+export async function getMarketListings(): Promise<BuyNowListing[]> {
+  return getBuyNowListings();
+}
+
+// Get My Market Listings (alias)
+export async function getMyMarketListings(address: string): Promise<BuyNowListing[]> {
+  const allListings = await getBuyNowListings();
+  return allListings.filter(l => l.seller_address === address);
 }
 
 export { API_URL, L2_API_URL, KRAY_OS_API };
